@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
+import { invoke } from '@tauri-apps/api/core'
 
 interface TranslationService {
   name: string
@@ -23,9 +24,19 @@ export default function TranslationResult({ sourceText, results, isLoading }: Tr
     setTimeout(() => setCopiedService(null), 2000)
   }
 
-  const handleTTS = (serviceName: string) => {
+  const handleTTS = async (serviceName: string) => {
     setTtsPlaying(serviceName)
-    setTimeout(() => setTtsPlaying(null), 3000)
+    try {
+      const text = results.find(r => r.name === serviceName)?.text || ''
+      await invoke('speak', {
+        text: text,
+        voice: null
+      })
+      setTimeout(() => setTtsPlaying(null), 3000)
+    } catch (error) {
+      console.error('TTS error:', error)
+      setTimeout(() => setTtsPlaying(null), 1000)
+    }
   }
 
   if (isLoading) {

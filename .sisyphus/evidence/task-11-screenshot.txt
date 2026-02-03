@@ -1,0 +1,18 @@
+=== Task 11 Screenshot Translation Flow ===
+
+Build Status:
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-qX1vLISk.css   11.13 kB │ gzip:  2.93 kB
+dist/assets/index-D8wT3-FJ.js   230.96 kB │ gzip: 69.10 kB
+✓ built in 893ms
+
+Component Features:
+  const startSelection = useCallback((e: React.MouseEvent) => {
+  const updateSelection = useCallback((e: React.MouseEvent) => {
+    await captureAndTranslate()
+  const captureAndTranslate = async () => {
+      const ocrResult = await invoke<{ text: string, confidence: number }>('ocr', {
+      setOcrText(ocrResult.text)
+      if (ocrResult.text.trim()) {
+        const detected = detectLanguage(ocrResult.text)

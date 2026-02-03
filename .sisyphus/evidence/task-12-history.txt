@@ -1,0 +1,18 @@
+=== Task 12 History and Favorites ===
+
+Build Status:
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-plF-tk6G.css   12.19 kB │ gzip:  3.13 kB
+dist/assets/index-DTFLADX8.js   243.94 kB │ gzip: 71.98 kB
+✓ built in 1.02s
+
+Store Features:
+  addToHistory: (item: TranslationItem) => void
+  toggleFavorite: (id: string) => void
+  clearHistory: () => void
+type PersistedHistoryStore = Omit<HistoryStore, 'searchHistory'>
+      addToHistory: (item: TranslationItem) => {
+      toggleFavorite: (id: string) => {
+      clearHistory: () => {
+export const searchHistory = (query: string): TranslationItem[] => {

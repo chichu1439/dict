@@ -6,11 +6,13 @@ mod translate;
 mod services;
 mod ocr;
 mod hotkey;
+mod tts;
 
 use models::{TranslationRequest, TranslationResponse};
 use translate::TranslationService;
 use ocr::models::{OcrRequest, OcrResult};
 use hotkey::models::HotkeyConfig;
+use tts::models::{TtsRequest, TtsResponse};
 
 #[tauri::command]
 async fn ocr(request: OcrRequest) -> Result<OcrResult, String> {
@@ -25,6 +27,11 @@ fn get_hotkeys() -> HotkeyConfig {
 #[tauri::command]
 fn set_hotkey(action: String, shortcut: String) -> Result<(), String> {
     hotkey::set_hotkey(action, shortcut)
+}
+
+#[tauri::command]
+async fn speak(request: TtsRequest) -> Result<TtsResponse, String> {
+    tts::speak(request).await
 }
 
 #[tauri::command]

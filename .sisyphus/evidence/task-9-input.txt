@@ -1,0 +1,15 @@
+=== Task 9 Input Translation Flow ===
+
+Build Status:
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-D0f_Jyzz.css   10.38 kB │ gzip:  2.76 kB
+dist/assets/index-D6SS4sIB.js   224.95 kB │ gzip: 67.89 kB
+✓ built in 999ms
+
+Component Features:
+  const detectLanguage = (text: string): string => {
+  const handleTranslate = async () => {
+      const detected = sourceLang === 'auto' ? detectLanguage(inputText) : sourceLang
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+      handleTranslate()

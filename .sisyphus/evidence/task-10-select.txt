@@ -1,0 +1,18 @@
+=== Task 10 Select Translation Flow ===
+
+Build Status:
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-C6QFanFV.css   10.71 kB │ gzip:  2.84 kB
+dist/assets/index-DwIWBy9S.js   227.50 kB │ gzip: 68.44 kB
+✓ built in 927ms
+
+Component Features:
+import { readText } from '@tauri-apps/plugin-clipboard-manager'
+        const text = await readText()
+    const checkInterval = setInterval(handleClipboardChange, 1000)
+      clearInterval(checkInterval)
+  const detectLanguage = (text: string): string => {
+  const handleTranslate = async () => {
+      const detected = detectLanguage(clipboardText)
+          onClick={handleTranslate}

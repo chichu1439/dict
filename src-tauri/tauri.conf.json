@@ -29,8 +29,30 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
-    "icon": []
+    "targets": ["msi", "nsis"],
+    "icon": [],
+    "publisher": "DictWin"
   },
-  "plugins": {}
+  "plugins": {
+    "globalShortcut": {
+      "shortcuts": [
+        {
+          "id": "input_translation",
+          "accelerator": "CmdOrCtrl+Alt+A"
+        },
+        {
+          "id": "select_translation",
+          "accelerator": "CmdOrCtrl+Alt+D"
+        },
+        {
+          "id": "screenshot_ocr",
+          "accelerator": "CmdOrCtrl+Alt+S"
+        },
+        {
+          "id": "silent_ocr",
+          "accelerator": "CmdOrCtrl+Shift+Alt+S"
+        }
+      ]
+    }
+  }
 }
