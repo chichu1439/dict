@@ -1,0 +1,11 @@
+=== Task 8 Global Hotkey Manager ===
+
+Hotkey Module Files:
+src-tauri/src/hotkey/models.rs
+src-tauri/src/hotkey/mod.rs
+
+Default Hotkeys:
+                    shortcut: "CmdOrCtrl+Alt+A".to_string(),
+                    shortcut: "CmdOrCtrl+Alt+D".to_string(),
+                    shortcut: "CmdOrCtrl+Alt+S".to_string(),
+                    shortcut: "CmdOrCtrl+Shift+Alt+S".to_string(),

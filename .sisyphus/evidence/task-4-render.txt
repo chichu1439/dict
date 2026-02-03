@@ -1,0 +1,19 @@
+=== Task 4 Translation Result Component ===
+
+Build Status:
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-OCtIIBXO.css    7.92 kB │ gzip:  2.28 kB
+dist/assets/index-D7qzkmmn.js   215.09 kB │ gzip: 65.83 kB
+✓ built in 1.04s
+
+Component Features:
+interface TranslationService {
+interface TranslationResultProps {
+  results: TranslationService[]
+export default function TranslationResult({ sourceText, results, isLoading }: TranslationResultProps) {
+  const handleCopy = async (text: string, serviceName: string) => {
+  const handleTTS = (serviceName: string) => {
+              onClick={() => handleCopy(sourceText, 'source')}
+                  onClick={() => handleTTS(result.name)}
+                  onClick={() => handleCopy(result.text, result.name)}

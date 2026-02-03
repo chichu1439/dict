@@ -1,0 +1,10 @@
+=== Task 7 Windows OCR API ===
+
+OCR Module Files:
+src-tauri/src/ocr/models.rs
+src-tauri/src/ocr/mod.rs
+
+Dependencies Added:
+base64 = "0.22"
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = ["Graphics_Capture", "Media_Ocr", "Foundation", "Storage_Streams", "Graphics_Imaging"] }

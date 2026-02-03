@@ -1,0 +1,17 @@
+=== Task 3 Main Window UI Verification ===
+
+Build Status:
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-BG5CxwbG.css    6.75 kB │ gzip:  2.02 kB
+dist/assets/index-C45hWdN_.js   211.26 kB │ gzip: 65.01 kB
+✓ built in 908ms
+
+App.tsx Window Controls:
+import { getCurrentWindow } from '@tauri-apps/api/window'
+  const handleClose = async () => {
+    const window = getCurrentWindow()
+  const handleMinimize = async () => {
+    const window = getCurrentWindow()
+            onClick={handleMinimize}
+            onClick={handleClose}

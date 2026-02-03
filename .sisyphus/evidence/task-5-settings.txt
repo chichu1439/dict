@@ -1,0 +1,20 @@
+=== Task 5 Settings UI ===
+
+Build Status:
+computing gzip size...
+dist/index.html                   0.46 kB │ gzip:  0.30 kB
+dist/assets/index-BujKxf7T.css   10.15 kB │ gzip:  2.71 kB
+dist/assets/index-C_JzWDft.js   221.30 kB │ gzip: 67.27 kB
+✓ built in 1.29s
+
+Settings Features:
+interface ServiceConfig {
+  const [activeTab, setActiveTab] = useState('services')
+  const [services, setServices] = useState<ServiceConfig[]>([
+  const handleServiceToggle = (index: number) => {
+  const handleApiKeyChange = (index: number, value: string) => {
+                activeTab === tab
+          {activeTab === 'services' && (
+                      onClick={() => handleServiceToggle(index)}
+                        onChange={(e) => handleApiKeyChange(index, e.target.value)}
+          {activeTab === 'hotkeys' && (

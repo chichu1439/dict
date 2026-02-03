@@ -1,0 +1,13 @@
+=== Task 6 Translation API Clients ===
+
+Source Files:
+src-tauri/src/translate/mod.rs
+src-tauri/src/models.rs
+src-tauri/src/main.rs
+src-tauri/src/services/mod.rs
+src-tauri/src/services/deepl.rs
+src-tauri/src/services/openai.rs
+
+Services Implemented:
+struct DeepLService
+struct OpenAIService
