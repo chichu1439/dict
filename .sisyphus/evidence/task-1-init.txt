@@ -1,0 +1,50 @@
+total 256
+drwxr-xr-x   16 chuangzhou  staff    512  2月  3 23:37 .
+drwxr-xr-x   38 chuangzhou  staff   1216  2月  3 22:44 ..
+-rw-r--r--    1 chuangzhou  staff    328  2月  3 23:36 .gitignore
+drwxr-xr-x    6 chuangzhou  staff    192  2月  3 23:36 .sisyphus
+drwxr-xr-x    4 chuangzhou  staff    128  2月  3 23:37 dist
+-rw-r--r--    1 chuangzhou  staff    363  2月  3 23:34 index.html
+drwxr-xr-x  105 chuangzhou  staff   3360  2月  3 23:37 node_modules
+-rw-r--r--    1 chuangzhou  staff  96035  2月  3 23:36 package-lock.json
+-rw-r--r--    1 chuangzhou  staff    733  2月  3 23:32 package.json
+-rw-r--r--    1 chuangzhou  staff     80  2月  3 23:34 postcss.config.js
+drwxr-xr-x    7 chuangzhou  staff    224  2月  3 23:35 src
+drwxr-xr-x    5 chuangzhou  staff    160  2月  3 23:36 src-tauri
+-rw-r--r--    1 chuangzhou  staff    182  2月  3 23:34 tailwind.config.js
+-rw-r--r--    1 chuangzhou  staff    562  2月  3 23:33 tsconfig.json
+-rw-r--r--    1 chuangzhou  staff    213  2月  3 23:33 tsconfig.node.json
+-rw-r--r--    1 chuangzhou  staff    982  2月  3 23:33 vite.config.ts
+
+total 24
+drwxr-xr-x   7 chuangzhou  staff  224  2月  3 23:35 .
+drwxr-xr-x  16 chuangzhou  staff  512  2月  3 23:37 ..
+-rw-r--r--   1 chuangzhou  staff  318  2月  3 23:35 App.tsx
+drwxr-xr-x   2 chuangzhou  staff   64  2月  3 23:34 components
+-rw-r--r--   1 chuangzhou  staff   59  2月  3 23:35 index.css
+-rw-r--r--   1 chuangzhou  staff  226  2月  3 23:35 main.tsx
+drwxr-xr-x   2 chuangzhou  staff   64  2月  3 23:34 stores
+
+total 16
+drwxr-xr-x   5 chuangzhou  staff  160  2月  3 23:36 .
+drwxr-xr-x  16 chuangzhou  staff  512  2月  3 23:37 ..
+-rw-r--r--   1 chuangzhou  staff  452  2月  3 23:35 Cargo.toml
+drwxr-xr-x   3 chuangzhou  staff   96  2月  3 23:35 src
+-rw-r--r--   1 chuangzhou  staff  639  2月  3 23:36 tauri.conf.json
+
+  "dependencies": {
+    "@tauri-apps/api": "^2.1.0",
+    "@tauri-apps/plugin-store": "^2.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "autoprefixer": "^10.4.17",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.3.3",
