@@ -7,8 +7,6 @@ use windows::{
     Graphics::Imaging::BitmapDecoder,
     Media::Ocr::OcrEngine,
     Storage::Streams::{InMemoryRandomAccessStream, DataWriter},
-    core::Interface,
-    Foundation::IAsyncOperation,
 };
 
 #[cfg(target_os = "windows")]
@@ -39,8 +37,6 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
     
     writer.StoreAsync()
         .map_err(|e| format!("Failed to store async: {}", e))?
-        .cast::<IAsyncOperation<u32>>()
-        .map_err(|e| format!("Failed to cast store op: {}", e))?
         .await
         .map_err(|e| format!("Failed to await store: {}", e))?;
         
@@ -83,7 +79,10 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
 
     // Calculate "confidence" simply as 0.0 or derived from text angle (legacy behavior requested?)
     // The previous code tried `result.text_angle()`. The method is `TextAngle()`.
-    let confidence = result.TextAngle().map(|a| a.0).unwrap_or(0.0).abs() as f64;
+    let confidence = result.TextAngle()
+        .and_then(|a| a.Value())
+        .unwrap_or(0.0)
+        .abs() as f64;
 
     Ok(AppOcrResult {
         text,
