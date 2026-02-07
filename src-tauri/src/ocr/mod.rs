@@ -7,6 +7,7 @@ use windows::{
     Graphics::Imaging::BitmapDecoder,
     Media::Ocr::OcrEngine,
     Storage::Streams::{InMemoryRandomAccessStream, DataWriter},
+    core::Interface,
     Foundation::IAsyncOperation,
 };
 
@@ -38,6 +39,8 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
     
     writer.StoreAsync()
         .map_err(|e| format!("Failed to store async: {}", e))?
+        .cast::<IAsyncOperation<u32>>()
+        .map_err(|e| format!("Failed to cast store op: {}", e))?
         .await
         .map_err(|e| format!("Failed to await store: {}", e))?;
         
@@ -65,13 +68,13 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
 
     // OCR
     let engine = OcrEngine::TryCreateFromUserProfileLanguages()
-        .map_err(|e| format!("Failed to create OCR engine: {}", e))?;
+        .map_err(|e| format!("Failed to create OCR engine from user profile: {}", e))?;
 
     let result = engine
         .RecognizeAsync(&bitmap)
-        .map_err(|e| format!("Failed to call RecognizeAsync: {}", e))?
+        .map_err(|e| format!("Failed to initiate OCR: {}", e))?
         .await
-        .map_err(|e| format!("OCR failed: {}", e))?;
+        .map_err(|e| format!("OCR execution failed: {}", e))?;
 
     let text = result
         .Text()

@@ -6,7 +6,6 @@ use windows::{
     Media::Playback::MediaPlayer,
     Media::Core::MediaSource,
     core::HSTRING,
-    Foundation::IAsyncOperation,
 };
 
 #[cfg(target_os = "windows")]
