@@ -6,12 +6,14 @@ pub struct TranslationRequest {
     pub source_lang: String,
     pub target_lang: String,
     pub services: Vec<String>,
+    pub config: Option<std::collections::HashMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TranslationResult {
-    pub service: String,
+    pub name: String,
     pub text: String,
+    pub error: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

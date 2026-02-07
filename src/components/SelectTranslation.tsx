@@ -2,13 +2,25 @@ import { useState, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { readText } from '@tauri-apps/plugin-clipboard-manager'
 import TranslationResult from './TranslationResult'
+import { useSettingsStore } from '../stores/settingsStore'
+
+interface TranslationService {
+  name: string
+  text: string
+}
+
+interface TranslationResponse {
+  results: TranslationService[]
+}
 
 export default function SelectTranslation() {
   const [clipboardText, setClipboardText] = useState('')
-  const [results, setResults] = useState<any[]>([])
+  const [results, setResults] = useState<TranslationService[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [showTranslateButton, setShowTranslateButton] = useState(false)
   const buttonPosition = useRef({ x: 0, y: 0 })
+
+  const { services } = useSettingsStore()
 
   useEffect(() => {
     const handleClipboardChange = async () => {
@@ -70,14 +82,29 @@ export default function SelectTranslation() {
       const detected = detectLanguage(clipboardText)
       const target = detected === 'zh' ? 'en' : 'zh'
 
-      const response = await invoke<any[]>('translate', {
-        text: clipboardText,
-        sourceLang: detected,
-        targetLang: target,
-        services: ['OpenAI', 'DeepL', 'Google']
+      const enabledServices = services.filter(s => s.enabled)
+      const serviceNames = enabledServices.map(s => s.name)
+
+      const config: Record<string, any> = {}
+      for (const s of enabledServices) {
+        config[s.name.toLowerCase()] = {
+          apiKey: s.apiKey,
+          accessKeyId: s.accessKeyId,
+          accessKeySecret: s.accessKeySecret
+        }
+      }
+
+      const response = await invoke<TranslationResponse>('translate', {
+        request: {
+          text: clipboardText,
+          source_lang: detected,
+          target_lang: target,
+          services: serviceNames,
+          config: config
+        }
       })
 
-      setResults(response)
+      setResults(response.results)
     } catch (error) {
       console.error('Translation error:', error)
     } finally {
@@ -111,15 +138,15 @@ export default function SelectTranslation() {
           setClipboardText('')
           setResults([])
         }}>
-          <div className="bg-gray-800 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-auto m-4" onClick={e => e.stopPropagation()}>
-            <header className="flex items-center justify-between p-4 border-b border-gray-700">
-              <h2 className="text-lg font-semibold">Translate Selection</h2>
+          <div className="bg-white dark:bg-gray-800 rounded-lg w-full max-w-2xl max-h-[90vh] overflow-auto m-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <header className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Translate Selection</h2>
               <button
                 onClick={() => {
                   setClipboardText('')
                   setResults([])
                 }}
-                className="w-8 h-8 rounded hover:bg-gray-700 flex items-center justify-center"
+                className="w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -131,7 +158,7 @@ export default function SelectTranslation() {
               <div className="flex items-center justify-center py-12">
                 <div className="flex flex-col items-center gap-3">
                   <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                  <p className="text-gray-400 text-sm">Translating...</p>
+                  <p className="text-gray-500 dark:text-gray-400 text-sm">Translating...</p>
                 </div>
               </div>
             ) : (

@@ -8,6 +8,6 @@ pub fn get_hotkeys() -> HotkeyConfig {
 }
 
 #[tauri::command]
-pub fn set_hotkey(action: String, shortcut: String) -> Result<(), String> {
+pub fn set_hotkey(_action: String, _shortcut: String) -> Result<(), String> {
     Ok(())
 }

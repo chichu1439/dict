@@ -1,51 +1,74 @@
-use crate::models::{TranslationRequest, TranslationResult};
-use super::TranslationService;
-use async_trait::async_trait;
-use serde_json::{json, Value};
+use crate::models::TranslationResult;
+use reqwest;
+use std::env;
 
-pub struct DeepLService;
+pub async fn translate(
+    text: &str,
+    _source_lang: &str,
+    target_lang: &str,
+    config: Option<&serde_json::Value>,
+) -> Result<TranslationResult, String> {
+    let api_key = if let Some(c) = config {
+        c.get("apiKey").and_then(|v| v.as_str()).map(|s| s.to_string())
+    } else {
+        None
+    };
 
-#[async_trait]
-impl TranslationService for DeepLService {
-    fn name(&self) -> &str {
-        "DeepL"
-    }
-
-    async fn translate(&self, request: &TranslationRequest, api_key: &str) -> Result<TranslationResult, String> {
-        let client = reqwest::Client::new();
-        
-        let payload = json!({
-            "text": vec![&request.text],
-            "source_lang": request.source_lang.to_uppercase(),
-            "target_lang": request.target_lang.to_uppercase()
-        });
-
-        let response = client
-            .post("https://api-free.deepl.com/v2/translate")
-            .header("Authorization", format!("DeepL-Auth-Key {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
-
-        if !response.status().is_success() {
-            return Err(format!("API error: {}", response.status()));
-        }
-
-        let body: Value = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        let translation = body["translations"][0]["text"]
-            .as_str()
-            .unwrap_or("Translation failed")
-            .to_string();
-
-        Ok(TranslationResult {
-            service: self.name().to_string(),
-            text: translation,
+    let api_key = api_key
+        .or_else(|| env::var("DEEPL_API_KEY").ok())
+        .or_else(|| {
+            std::fs::read_to_string(".env")
+                .map_err(|_| ())
+                .and_then(|s| {
+                    s.lines()
+                        .find(|l| l.starts_with("DEEPL_API_KEY="))
+                        .map(|l| l.trim_start_matches("DEEPL_API_KEY=").to_string())
+                        .ok_or(())
+                })
+                .ok()
         })
+        .ok_or_else(|| "DEEPL_API_KEY not found".to_string())?;
+
+    let target = match target_lang.to_uppercase().as_str() {
+        "ZH" | "ZH-HANS" => "ZH",
+        "EN" => "EN-US",
+        "JA" => "JA",
+        "KO" => "KO",
+        "FR" => "FR",
+        "DE" => "DE",
+        "ES" => "ES",
+        "RU" => "RU",
+        _ => "EN-US",
+    };
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post("https://api-free.deepl.com/v2/translate")
+        .header("Authorization", format!("DeepL-Auth-Key {}", api_key))
+        .form(&[
+            ("text", text),
+            ("target_lang", target),
+        ])
+        .send()
+        .await
+        .map_err(|e| format!("DeepL API request failed: {}", e))?;
+
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("DeepL API error: {}", error_text));
     }
+
+    let json: serde_json::Value = response.json().await
+        .map_err(|e| format!("Failed to parse DeepL response: {}", e))?;
+
+    let translated_text = json["translations"][0]["text"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or("No translation in response")?;
+
+    Ok(TranslationResult {
+        name: "DeepL".to_string(),
+        text: translated_text,
+        error: None,
+    })
 }

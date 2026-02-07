@@ -1,18 +1,44 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import TranslationResult from './TranslationResult'
+import { useSettingsStore } from '../stores/settingsStore'
+import { useHistoryStore } from '../stores/historyStore'
+import { v4 as uuidv4 } from 'uuid'
+
+import { en, zh } from '../locales'
 
 interface TranslationService {
   name: string
   text: string
 }
 
-export default function InputTranslation({ onClose }: { onClose: () => void }) {
+interface TranslationResponse {
+  results: TranslationService[]
+}
+
+export default function InputTranslation() {
   const [inputText, setInputText] = useState('')
   const [results, setResults] = useState<TranslationService[]>([])
   const [isLoading, setIsLoading] = useState(false)
+  const [hasSearched, setHasSearched] = useState(false)
+
+  const { services, sourceLang: defaultSource, targetLang: defaultTarget, loaded, loadSettings, uiLanguage } = useSettingsStore()
+  const { addToHistory } = useHistoryStore()
+  const t = uiLanguage === 'zh' ? zh.translate : en.translate
+
   const [sourceLang, setSourceLang] = useState('auto')
   const [targetLang, setTargetLang] = useState('zh')
+
+  useEffect(() => {
+    if (!loaded) loadSettings()
+  }, [loaded, loadSettings])
+
+  useEffect(() => {
+    if (loaded) {
+      setSourceLang(defaultSource)
+      setTargetLang(defaultTarget)
+    }
+  }, [loaded, defaultSource, defaultTarget])
 
   const detectLanguage = (text: string): string => {
     const chineseRegex = /[\u4e00-\u9fa5\u3400-\u4dbf]/
@@ -26,69 +52,104 @@ export default function InputTranslation({ onClose }: { onClose: () => void }) {
     if (!inputText.trim()) return
 
     setIsLoading(true)
+    setHasSearched(true)
+
+    // Check if running in a browser (where Tauri API is missing)
+    // @ts-ignore
+    if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
+      alert('Tauri API not found. Please run this app using "npm run tauri:dev" or the built executable, not a standard browser.');
+      setIsLoading(false);
+      return;
+    }
 
     try {
       const detected = sourceLang === 'auto' ? detectLanguage(inputText) : sourceLang
       const target = targetLang || (detected === 'zh' ? 'en' : 'zh')
 
-      const response = await invoke<TranslationService[]>('translate', {
-        text: inputText,
-        sourceLang: detected,
-        targetLang: target,
-        services: ['OpenAI', 'DeepL', 'Google']
+      const enabledServices = services.filter(s => s.enabled)
+      const serviceNames = enabledServices.map(s => s.name)
+
+      const config: Record<string, any> = {}
+      for (const s of enabledServices) {
+        config[s.name.toLowerCase()] = {
+          apiKey: s.apiKey,
+          accessKeyId: s.accessKeyId,
+          accessKeySecret: s.accessKeySecret,
+          model: s.model
+        }
+      }
+
+      const response = await invoke<TranslationResponse>('translate', {
+        request: {
+          text: inputText,
+          source_lang: detected,
+          target_lang: target,
+          services: serviceNames,
+          config: config
+        }
       })
 
-      setResults(response)
+      console.log('Results received:', response)
+      setResults(response.results)
+
+      // Add to history
+      if (response.results.length > 0) {
+        addToHistory({
+          id: uuidv4(),
+          sourceText: inputText,
+          targetText: response.results.map(r => r.text).join(' '), // Store combined text or handle differently
+          sourceLang: detected,
+          targetLang: target,
+          services: response.results.map(r => r.name),
+          timestamp: Date.now(),
+          isFavorite: false
+        })
+      }
     } catch (error) {
       console.error('Translation error:', error)
+      setResults([]) // Clear results on error
+      // TODO: Add visual error feedback
+      const errorStr = String(error);
+      // 改进错误提示，显示具体服务配置问题
+      if (errorStr.includes('API key') || errorStr.includes('access')) {
+        alert('Translation Error: Please configure API keys in Settings > Services for the enabled translation services.');
+      } else {
+        alert('Translation Error: ' + errorStr);
+      }
     } finally {
       setIsLoading(false)
     }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Escape') {
-      onClose()
-    } else if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === 'Enter' && !e.shiftKey) {
       handleTranslate()
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-gray-800 rounded-lg w-full max-w-2xl p-6 m-4" onClick={e => e.stopPropagation()}>
-        <header className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Translate</h2>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded hover:bg-gray-700 flex items-center justify-center"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </header>
-
-        <div className="space-y-4">
-          <div>
+    <div className="h-full flex flex-col p-6 overflow-hidden">
+      <div className="max-w-4xl mx-auto w-full flex flex-col h-full gap-6">
+        <div className="flex-shrink-0 space-y-4">
+          <div className="relative group">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl opacity-30 group-hover:opacity-60 transition duration-500 blur"></div>
             <textarea
               value={inputText}
               onChange={e => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Enter text to translate..."
-              className="w-full h-32 bg-gray-900 border border-gray-700 rounded-lg px-4 py-3 text-white resize-none focus:outline-none focus:border-blue-500"
+              placeholder={t.placeholder}
+              className="relative w-full h-32 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-5 py-4 text-gray-900 dark:text-white resize-none focus:outline-none focus:border-blue-500/50 shadow-xl text-lg placeholder-gray-400 dark:placeholder-gray-500 transition-all"
             />
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 bg-white/50 dark:bg-gray-800/50 p-2 rounded-xl border border-gray-200 dark:border-white/5 backdrop-blur-sm shadow-sm dark:shadow-none">
             <div className="flex-1">
-              <label className="block text-sm text-gray-400 mb-2">Source Language</label>
               <select
                 value={sourceLang}
                 onChange={e => setSourceLang(e.target.value)}
-                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-transparent text-gray-700 dark:text-gray-300 text-sm font-medium px-3 py-2 focus:outline-none cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors"
               >
-                <option value="auto">Auto Detect</option>
+                <option value="auto">{t.autoDetect}</option>
                 <option value="en">English</option>
                 <option value="zh">中文</option>
                 <option value="ja">日本語</option>
@@ -96,12 +157,28 @@ export default function InputTranslation({ onClose }: { onClose: () => void }) {
               </select>
             </div>
 
+            <div className="w-px h-4 bg-gray-300 dark:bg-gray-700"></div>
+
+            <button 
+              className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+              onClick={() => {
+                const temp = sourceLang;
+                setSourceLang(targetLang);
+                setTargetLang(temp === 'auto' ? 'en' : temp);
+              }}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+              </svg>
+            </button>
+
+            <div className="w-px h-4 bg-gray-300 dark:bg-gray-700"></div>
+
             <div className="flex-1">
-              <label className="block text-sm text-gray-400 mb-2">Target Language</label>
               <select
                 value={targetLang}
                 onChange={e => setTargetLang(e.target.value)}
-                className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                className="w-full bg-transparent text-gray-700 dark:text-gray-300 text-sm font-medium px-3 py-2 focus:outline-none cursor-pointer hover:text-gray-900 dark:hover:text-white transition-colors text-right"
               >
                 <option value="zh">中文</option>
                 <option value="en">English</option>
@@ -109,22 +186,35 @@ export default function InputTranslation({ onClose }: { onClose: () => void }) {
                 <option value="ko">한국어</option>
               </select>
             </div>
-          </div>
 
-          <button
-            onClick={handleTranslate}
-            disabled={isLoading || !inputText.trim()}
-            className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg font-medium transition-colors"
-          >
-            {isLoading ? 'Translating...' : 'Translate'}
-          </button>
+            <button
+              onClick={handleTranslate}
+              disabled={isLoading || !inputText.trim()}
+              className="ml-2 px-6 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-gray-300 dark:disabled:bg-gray-700 disabled:cursor-not-allowed rounded-lg font-medium text-white shadow-lg shadow-blue-500/20 transition-all active:scale-95"
+            >
+              {isLoading ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                t.translateBtn
+              )}
+            </button>
+          </div>
         </div>
 
-        {results.length > 0 && (
-          <div className="mt-4">
-            <TranslationResult sourceText={inputText} results={results} />
-          </div>
-        )}
+        <div className="flex-1 overflow-auto custom-scrollbar">
+          {results.length > 0 ? (
+            <div className="pb-6">
+              <TranslationResult sourceText={inputText} results={results} />
+            </div>
+          ) : (!isLoading && hasSearched && (
+            <div className="flex flex-col items-center justify-center h-full text-gray-400 dark:text-gray-500 gap-4">
+              <svg className="w-16 h-16 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p>{t.noResultHint}</p>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )

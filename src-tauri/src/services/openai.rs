@@ -1,60 +1,82 @@
-use crate::models::{TranslationRequest, TranslationResult};
-use super::TranslationService;
-use async_trait::async_trait;
-use serde_json::{json, Value};
+use crate::models::TranslationResult;
+use reqwest;
+use std::env;
 
-pub struct OpenAIService;
+pub async fn translate(
+    text: &str,
+    _source_lang: &str,
+    target_lang: &str,
+    config: Option<&serde_json::Value>,
+) -> Result<TranslationResult, String> {
+    let api_key = if let Some(c) = config {
+        c.get("apiKey").and_then(|v| v.as_str()).map(|s| s.to_string())
+    } else {
+        None
+    };
 
-#[async_trait]
-impl TranslationService for OpenAIService {
-    fn name(&self) -> &str {
-        "OpenAI"
-    }
+    let api_url = config
+        .and_then(|c| c.get("apiUrl"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("https://api.openai.com/v1/chat/completions");
 
-    async fn translate(&self, request: &TranslationRequest, api_key: &str) -> Result<TranslationResult, String> {
-        let client = reqwest::Client::new();
-        
-        let payload = json!({
-            "model": "gpt-3.5-turbo",
+    let model = config
+        .and_then(|c| c.get("model"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("gpt-3.5-turbo");
+
+    let api_key = api_key
+        .or_else(|| env::var("OPENAI_API_KEY").ok())
+        .or_else(|| {
+            std::fs::read_to_string(".env")
+                .map_err(|_| ())
+                .and_then(|s| {
+                    s.lines()
+                        .find(|l| l.starts_with("OPENAI_API_KEY="))
+                        .map(|l| l.trim_start_matches("OPENAI_API_KEY=").to_string())
+                        .ok_or(())
+                })
+                .ok()
+        })
+        .ok_or_else(|| "API key not found in config or environment".to_string())?;
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(api_url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .json(&serde_json::json!({
+            "model": model,
             "messages": [
                 {
                     "role": "system",
-                    "content": format!("Translate the following text from {} to {}. Only return the translation, no explanation.", 
-                        request.source_lang, request.target_lang)
+                    "content": format!("You are a translation engine. Translate the following text to {}. Output ONLY the translated text, no explanations.", target_lang)
                 },
                 {
                     "role": "user",
-                    "content": &request.text
+                    "content": text
                 }
-            ]
-        });
+            ],
+            "max_tokens": 1000
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("OpenAI API request failed: {}", e))?;
 
-        let response = client
-            .post("https://api.openai.com/v1/chat/completions")
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&payload)
-            .send()
-            .await
-            .map_err(|e| format!("Request failed: {}", e))?;
-
-        if !response.status().is_success() {
-            return Err(format!("API error: {}", response.status()));
-        }
-
-        let body: Value = response
-            .json()
-            .await
-            .map_err(|e| format!("Failed to parse response: {}", e))?;
-
-        let translation = body["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("Translation failed")
-            .to_string();
-
-        Ok(TranslationResult {
-            service: self.name().to_string(),
-            text: translation,
-        })
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        return Err(format!("OpenAI API error: {}", error_text));
     }
+
+    let json: serde_json::Value = response.json().await
+        .map_err(|e| format!("Failed to parse OpenAI response: {}", e))?;
+
+    let translated_text = json["choices"][0]["message"]["content"]
+        .as_str()
+        .map(|s| s.trim().to_string())
+        .ok_or("No translation in response")?;
+
+    Ok(TranslationResult {
+        name: "OpenAI".to_string(),
+        text: translated_text,
+        error: None,
+    })
 }

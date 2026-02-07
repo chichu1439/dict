@@ -1,15 +1,27 @@
 import { useState, useCallback, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import TranslationResult from './TranslationResult'
+import { useSettingsStore } from '../stores/settingsStore'
+
+interface TranslationService {
+  name: string
+  text: string
+}
+
+interface TranslationResponse {
+  results: TranslationService[]
+}
 
 export default function ScreenshotTranslation() {
   const [isSelecting, setIsSelecting] = useState(false)
   const [ocrText, setOcrText] = useState('')
-  const [results, setResults] = useState<any[]>([])
+  const [results, setResults] = useState<TranslationService[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [showResults, setShowResults] = useState(false)
   const [startPos, setStartPos] = useState({ x: 0, y: 0 })
   const [currentPos, setCurrentPos] = useState({ x: 0, y: 0 })
+
+  const { services } = useSettingsStore()
 
   const startSelection = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
@@ -69,14 +81,29 @@ export default function ScreenshotTranslation() {
         const detected = detectLanguage(ocrResult.text)
         const target = detected === 'zh' ? 'en' : 'zh'
 
-        const translationResults = await invoke<any[]>('translate', {
-          text: ocrResult.text,
-          sourceLang: detected,
-          targetLang: target,
-          services: ['OpenAI', 'DeepL', 'Google']
+        const enabledServices = services.filter(s => s.enabled)
+        const serviceNames = enabledServices.map(s => s.name)
+
+        const config: Record<string, any> = {}
+        for (const s of enabledServices) {
+          config[s.name.toLowerCase()] = {
+            apiKey: s.apiKey,
+            accessKeyId: s.accessKeyId,
+            accessKeySecret: s.accessKeySecret
+          }
+        }
+
+        const response = await invoke<TranslationResponse>('translate', {
+          request: {
+            text: ocrResult.text,
+            source_lang: detected,
+            target_lang: target,
+            services: serviceNames,
+            config: config
+          }
         })
 
-        setResults(translationResults)
+        setResults(response.results)
       }
     } catch (error) {
       console.error('Screenshot translation error:', error)
@@ -138,12 +165,12 @@ export default function ScreenshotTranslation() {
 
       {showResults && !isSelecting && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowResults(false)}>
-          <div className="bg-gray-800 rounded-lg w-full max-w-3xl max-h-[90vh] overflow-auto m-4" onClick={e => e.stopPropagation()}>
-            <header className="flex items-center justify-between p-4 border-b border-gray-700">
-              <h2 className="text-lg font-semibold">Screenshot Translation</h2>
+          <div className="bg-white dark:bg-gray-800 rounded-lg w-full max-w-3xl max-h-[90vh] overflow-auto m-4 shadow-2xl" onClick={e => e.stopPropagation()}>
+            <header className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Screenshot Translation</h2>
               <button
                 onClick={() => setShowResults(false)}
-                className="w-8 h-8 rounded hover:bg-gray-700 flex items-center justify-center"
+                className="w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center text-gray-500 dark:text-gray-400"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -155,15 +182,15 @@ export default function ScreenshotTranslation() {
               <div className="flex items-center justify-center py-12">
                 <div className="flex flex-col items-center gap-3">
                   <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
-                  <p className="text-gray-400 text-sm">Processing OCR and translation...</p>
+                  <p className="text-gray-500 dark:text-gray-400 text-sm">Processing OCR and translation...</p>
                 </div>
               </div>
             ) : (
               <div className="p-4 space-y-4">
                 {ocrText && (
-                  <div className="bg-gray-700 rounded-lg p-4">
-                    <h3 className="text-sm font-semibold text-gray-300 mb-2">OCR Text</h3>
-                    <p className="text-white text-base">{ocrText}</p>
+                  <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-transparent">
+                    <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">OCR Text</h3>
+                    <p className="text-gray-900 dark:text-white text-base">{ocrText}</p>
                   </div>
                 )}
                 {results.length > 0 && (
