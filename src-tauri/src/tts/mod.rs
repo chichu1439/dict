@@ -14,8 +14,8 @@ use std::sync::Mutex;
 use std::sync::OnceLock;
 
 #[cfg(target_os = "windows")]
-// Keep the media player alive to ensure playback completes
-static GLOBAL_MEDIA_PLAYER: OnceLock<Mutex<Option<MediaPlayer>>> = OnceLock::new();
+// Keep the media player and stream alive to ensure playback completes
+static GLOBAL_MEDIA_PLAYER: OnceLock<Mutex<Option<(MediaPlayer, windows::Media::SpeechSynthesis::SpeechSynthesisStream)>>> = OnceLock::new();
 
 #[cfg(target_os = "windows")]
 pub async fn speak(request: crate::tts::models::TtsRequest) -> Result<crate::tts::models::TtsResponse, String> {
@@ -43,14 +43,13 @@ pub async fn speak(request: crate::tts::models::TtsRequest) -> Result<crate::tts
     player.Play()
         .map_err(|e| format!("Failed to play: {}", e))?;
 
-    // Store the player in a global static to prevent it from being dropped immediately,
-    // which would stop playback.
+    // Store the player and stream in a global static to prevent them from being dropped
     let mut global_player = GLOBAL_MEDIA_PLAYER
         .get_or_init(|| Mutex::new(None))
         .lock()
         .map_err(|e| format!("Failed to lock global player: {}", e))?;
     
-    *global_player = Some(player);
+    *global_player = Some((player, stream));
 
     Ok(crate::tts::models::TtsResponse {
         success: true,

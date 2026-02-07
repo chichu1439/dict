@@ -16,11 +16,19 @@ interface TranslationResponse {
   results: TranslationService[]
 }
 
-export default function InputTranslation() {
-  const [inputText, setInputText] = useState('')
+export default function InputTranslation({ initialText }: { initialText?: string }) {
+  const [inputText, setInputText] = useState(initialText || '')
   const [results, setResults] = useState<TranslationService[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
+
+  useEffect(() => {
+    if (initialText) {
+      setInputText(initialText)
+      // Optional: Auto-trigger translation if desired, but maybe let user click button
+      // handleTranslate() 
+    }
+  }, [initialText])
 
   const { services, sourceLang: defaultSource, targetLang: defaultTarget, loaded, loadSettings, uiLanguage } = useSettingsStore()
   const { addToHistory } = useHistoryStore()

@@ -3,7 +3,7 @@ import { useHistoryStore, searchHistory } from '../stores/historyStore'
 import { useSettingsStore } from '../stores/settingsStore'
 import { en, zh } from '../locales'
 
-export default function History({ onClose }: { onClose: () => void }) {
+export default function History({ onClose, onSelect }: { onClose: () => void; onSelect: (text: string) => void }) {
   const { history, deleteHistoryItem, clearHistory, toggleFavorite } = useHistoryStore()
   const { uiLanguage } = useSettingsStore()
   const t = uiLanguage === 'zh' ? zh.history : en.history
@@ -30,8 +30,9 @@ export default function History({ onClose }: { onClose: () => void }) {
     setFilteredHistory([])
   }
 
-  const handleReTranslate = (item: any) => {
-    console.log('Re-translate:', item)
+  const handleSelect = (item: any) => {
+    onSelect(item.sourceText)
+    onClose()
   }
 
   const formatDate = (timestamp: number): string => {
@@ -77,7 +78,10 @@ export default function History({ onClose }: { onClose: () => void }) {
                   className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors border border-gray-200 dark:border-transparent"
                 >
                   <div className="flex items-start justify-between mb-2">
-                    <div className="flex-1 min-w-0">
+                    <div 
+                      className="flex-1 min-w-0 cursor-pointer" 
+                      onClick={() => handleSelect(item)}
+                    >
                       <p className="text-gray-900 dark:text-white text-base break-words">{item.sourceText}</p>
                       <p className="text-gray-600 dark:text-gray-300 text-sm mt-1 break-words">{item.targetText}</p>
                     </div>
@@ -98,7 +102,7 @@ export default function History({ onClose }: { onClose: () => void }) {
                         </svg>
                       </button>
                       <button
-                        onClick={() => handleReTranslate(item)}
+                        onClick={() => handleSelect(item)}
                         className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-500 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"
                         title={t.reTranslate}
                       >

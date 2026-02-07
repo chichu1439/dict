@@ -135,6 +135,20 @@ export default function ScreenshotTranslation() {
     }
   }, [isSelecting, updateSelection, endSelection, handleKeyDown])
 
+  useEffect(() => {
+    const handleTrigger = () => {
+      setIsSelecting(true)
+      // Reset positions?
+      setStartPos({ x: 0, y: 0 })
+      setCurrentPos({ x: 0, y: 0 })
+    }
+
+    window.addEventListener('trigger-screenshot-ocr', handleTrigger)
+    return () => {
+      window.removeEventListener('trigger-screenshot-ocr', handleTrigger)
+    }
+  }, [])
+
   if (!isSelecting && !showResults) {
     return null
   }

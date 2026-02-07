@@ -24,9 +24,13 @@ export default function TranslationResult({ sourceText, results, isLoading }: Tr
   const t = uiLanguage === 'zh' ? zh.translate : en.translate
 
   const handleCopy = async (text: string, serviceName: string) => {
-    await writeText(text)
-    setCopiedService(serviceName)
-    setTimeout(() => setCopiedService(null), 2000)
+    try {
+      await writeText(text)
+      setCopiedService(serviceName)
+      setTimeout(() => setCopiedService(null), 2000)
+    } catch (error) {
+      console.error('Failed to copy text:', error)
+    }
   }
 
   const handleTTS = async (serviceName: string) => {
@@ -71,7 +75,7 @@ export default function TranslationResult({ sourceText, results, isLoading }: Tr
             <span className="text-xs text-gray-500 uppercase tracking-wide">{t.sourceText}</span>
             <button
               onClick={() => handleCopy(sourceText, 'source')}
-              className="text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors"
+              className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors"
               title="Copy to clipboard"
             >
               {copiedService === 'source' ? (
@@ -120,7 +124,7 @@ export default function TranslationResult({ sourceText, results, isLoading }: Tr
                   </button>
                   <button
                     onClick={() => handleCopy(result.text, result.name)}
-                    className="text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors"
+                    className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-400 hover:text-gray-600 dark:hover:text-white transition-colors"
                     title="Copy to clipboard"
                   >
                     {copiedService === result.name ? (

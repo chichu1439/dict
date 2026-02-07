@@ -161,7 +161,7 @@ export default function Settings({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-      <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-4xl h-[600px] shadow-2xl flex flex-col overflow-hidden">
+      <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-4xl h-[90vh] max-h-[600px] shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50">
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{t.title}</h2>

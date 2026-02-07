@@ -29,18 +29,22 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
     let stream = InMemoryRandomAccessStream::new()
         .map_err(|e| format!("Failed to create stream: {}", e))?;
     
-    let writer = DataWriter::CreateDataWriter(&stream.GetOutputStreamAt(0).map_err(|e| format!("Failed to get output stream: {}", e))?)
+    let writer = DataWriter::CreateDataWriter(&stream
+        .GetOutputStreamAt(0)
+        .map_err(|e| format!("Failed to get output stream: {}", e))?)
         .map_err(|e| format!("Failed to create data writer: {}", e))?;
     
     writer.WriteBytes(&image_data)
         .map_err(|e| format!("Failed to write bytes: {}", e))?;
     
-    writer.StoreAsync()
+    writer
+        .StoreAsync()
         .map_err(|e| format!("Failed to store async: {}", e))?
         .await
         .map_err(|e| format!("Failed to await store: {}", e))?;
         
-    writer.FlushAsync()
+    writer
+        .FlushAsync()
         .map_err(|e| format!("Failed to flush async: {}", e))?
         .await
         .map_err(|e| format!("Failed to await flush: {}", e))?;
@@ -57,7 +61,8 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
         .await
         .map_err(|e| format!("Failed to await decoder: {}", e))?;
 
-    let bitmap = decoder.GetSoftwareBitmapAsync()
+    let bitmap = decoder
+        .GetSoftwareBitmapAsync()
         .map_err(|e| format!("Failed to get software bitmap: {}", e))?
         .await
         .map_err(|e| format!("Failed to await software bitmap: {}", e))?;
@@ -72,17 +77,22 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
         .await
         .map_err(|e| format!("OCR execution failed: {}", e))?;
 
-    let text = result
-        .Text()
-        .map(|t| t.to_string())
-        .unwrap_or_default();
+    let text = match result.Text().ok() {
+        Some(t) => t.to_string(),
+        None => String::new(),
+    };
 
     // Calculate "confidence" simply as 0.0 or derived from text angle (legacy behavior requested?)
     // The previous code tried `result.text_angle()`. The method is `TextAngle()`.
-    let confidence = result.TextAngle()
-        .and_then(|a| a.Value())
-        .unwrap_or(0.0)
-        .abs() as f64;
+    let confidence = if let Some(angle_ref) = result.TextAngle().ok() {
+        if let Some(angle) = angle_ref.Value().ok() {
+            angle.abs() as f64
+        } else {
+            0.0
+        }
+    } else {
+        0.0
+    };
 
     Ok(AppOcrResult {
         text,
