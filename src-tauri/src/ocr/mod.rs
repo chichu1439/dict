@@ -7,7 +7,7 @@ use windows::{
     Graphics::Imaging::BitmapDecoder,
     Media::Ocr::OcrEngine,
     Storage::Streams::{InMemoryRandomAccessStream, DataWriter},
-    core::HSTRING,
+    Foundation::IAsyncOperation,
 };
 
 #[cfg(target_os = "windows")]

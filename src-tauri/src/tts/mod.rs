@@ -4,7 +4,9 @@ pub mod models;
 use windows::{
     Media::SpeechSynthesis::SpeechSynthesizer,
     Media::Playback::MediaPlayer,
+    Media::Core::MediaSource,
     core::HSTRING,
+    Foundation::IAsyncOperation,
 };
 
 #[cfg(target_os = "windows")]
@@ -33,7 +35,10 @@ pub async fn speak(request: crate::tts::models::TtsRequest) -> Result<crate::tts
     let content_type = stream.ContentType()
         .map_err(|e| format!("Failed to get content type: {}", e))?;
         
-    player.SetSource(&stream, &content_type)
+    let source = MediaSource::CreateFromStream(&stream, &content_type)
+        .map_err(|e| format!("Failed to create media source: {}", e))?;
+        
+    player.SetSource(&source)
         .map_err(|e| format!("Failed to set source: {}", e))?;
         
     player.Play()
