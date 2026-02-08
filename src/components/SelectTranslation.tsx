@@ -23,18 +23,39 @@ export default function SelectTranslation() {
   const { services } = useSettingsStore()
 
   useEffect(() => {
-    const handleClipboardChange = async () => {
+    const handleTrigger = async (e: Event) => {
+      window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Select Translation triggered' }));
       try {
-        const text = await readText()
-        if (text && text.length > 0 && text !== clipboardText) {
+        let text = (e as CustomEvent).detail;
+        // If text is not provided in event (e.g. manual trigger or fallback), read clipboard
+        if (!text || typeof text !== 'string') {
+             text = await readText();
+        }
+
+        if (text && text.trim().length > 0) {
+          window.dispatchEvent(new CustomEvent('debug-log', { detail: `Clipboard text found: ${text.substring(0, 20)}...` }));
           setClipboardText(text)
+          
+          // Trigger translation immediately
+          setIsLoading(true)
+          translateText(text)
+          
+          // Bring window to front/focus if it's not
+          const appWindow = await import('@tauri-apps/api/window').then(m => m.getCurrentWindow());
+          await appWindow.setFocus();
+        } else {
+             window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Clipboard is empty' }));
         }
       } catch (error) {
         console.error('Clipboard read error:', error)
+        window.dispatchEvent(new CustomEvent('debug-log', { detail: `Clipboard error: ${String(error)}` }));
       }
     }
 
-    const checkInterval = setInterval(handleClipboardChange, 1000)
+    window.addEventListener('trigger-select-translation', handleTrigger)
+    
+    // Cleanup polling for now as it might be annoying
+    // const checkInterval = setInterval(handleClipboardChange, 1000)
 
     const handleTextSelection = (e: MouseEvent) => {
       const selection = window.getSelection()
@@ -50,11 +71,12 @@ export default function SelectTranslation() {
     document.addEventListener('keydown', handleEscape)
 
     return () => {
-      clearInterval(checkInterval)
+      // clearInterval(checkInterval)
+      window.removeEventListener('trigger-select-translation', handleTrigger)
       document.removeEventListener('mouseup', handleTextSelection)
       document.removeEventListener('keydown', handleEscape)
     }
-  }, [clipboardText])
+  }, []) // Remove dependency on clipboardText to avoid loop
 
   const handleEscape = (e: KeyboardEvent) => {
     if (e.key === 'Escape') {
@@ -72,14 +94,14 @@ export default function SelectTranslation() {
     return 'en'
   }
 
-  const handleTranslate = async () => {
-    if (!clipboardText.trim()) return
+  const translateText = async (text: string) => {
+    if (!text.trim()) return
 
     setShowTranslateButton(false)
     setIsLoading(true)
 
     try {
-      const detected = detectLanguage(clipboardText)
+      const detected = detectLanguage(text)
       const target = detected === 'zh' ? 'en' : 'zh'
 
       const enabledServices = services.filter(s => s.enabled)
@@ -96,7 +118,7 @@ export default function SelectTranslation() {
 
       const response = await invoke<TranslationResponse>('translate', {
         request: {
-          text: clipboardText,
+          text: text,
           source_lang: detected,
           target_lang: target,
           services: serviceNames,
@@ -110,6 +132,10 @@ export default function SelectTranslation() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  const handleTranslate = () => {
+    translateText(clipboardText)
   }
 
   if (!clipboardText && results.length === 0) {

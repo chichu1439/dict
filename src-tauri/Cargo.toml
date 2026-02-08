@@ -27,9 +27,10 @@ sha1 = "0.10"
 url = "2.5"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1.7", features = ["v4"] }
+enigo = "0.6.1"
 
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.52", features = ["implement", "Graphics_Capture", "Media_Ocr", "Media_SpeechSynthesis", "Media_Playback", "Media_Core", "Foundation", "Storage_Streams", "Graphics_Imaging"] }
+windows = { version = "0.52", features = ["implement", "Graphics_Capture", "Media_Ocr", "Media_SpeechSynthesis", "Media_Playback", "Media_Core", "Foundation", "Storage_Streams", "Graphics_Imaging", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_System_LibraryLoader", "Win32_Graphics_GdiPlus", "Win32_Foundation"] }
 
 [features]
 default = ["custom-protocol"]

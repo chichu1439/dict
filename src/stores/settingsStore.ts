@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { Store } from '@tauri-apps/plugin-store'
+import { invoke } from '@tauri-apps/api/core'
 
 export interface ServiceConfig {
     name: string
@@ -50,10 +51,10 @@ const DEFAULT_SERVICES: ServiceConfig[] = [
 ]
 
 const DEFAULT_HOTKEYS: HotkeyConfig[] = [
-    { action: 'Input Translation', shortcut: 'Ctrl+Alt+A' },
-    { action: 'Select Text', shortcut: 'Ctrl+Alt+D' },
-    { action: 'Screenshot OCR', shortcut: 'Ctrl+Alt+S' },
-    { action: 'Silent OCR', shortcut: 'Ctrl+Alt+Shift+S' },
+    { action: 'input_translation', shortcut: 'Ctrl+Alt+A' },
+    { action: 'select_translation', shortcut: 'Ctrl+Alt+D' },
+    { action: 'screenshot_ocr', shortcut: 'Ctrl+Alt+S' },
+    { action: 'silent_ocr', shortcut: 'Ctrl+Alt+Shift+S' },
 ]
 
 let store: Store | null = null
@@ -120,9 +121,29 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
                 })
             }
 
+            const finalHotkeys = hotkeys || DEFAULT_HOTKEYS
+            
+            // Migrate old action names to new format
+            const migratedHotkeys = finalHotkeys.map(hotkey => {
+                const actionMap: Record<string, string> = {
+                    'Input Translation': 'input_translation',
+                    'Select Text': 'select_translation',
+                    'Screenshot OCR': 'screenshot_ocr',
+                    'Silent OCR': 'silent_ocr'
+                }
+                
+                if (actionMap[hotkey.action]) {
+                    return {
+                        ...hotkey,
+                        action: actionMap[hotkey.action]
+                    }
+                }
+                return hotkey
+            })
+
             set({
                 services: mergedServices,
-                hotkeys: hotkeys || DEFAULT_HOTKEYS,
+                hotkeys: migratedHotkeys,
                 sourceLang: sourceLang || 'auto',
                 targetLang: targetLang || 'zh',
                 windowOpacity: windowOpacity ?? 100,
@@ -130,6 +151,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
                 uiLanguage: uiLanguage ?? 'en',
                 loaded: true,
             })
+
+            // Register hotkeys with backend
+            try {
+                await invoke('register_hotkeys', { hotkeys: migratedHotkeys })
+            } catch (error) {
+                console.error('Failed to register hotkeys:', error)
+            }
         } catch (error) {
             console.error('Failed to load settings:', error)
             set({ loaded: true })
@@ -150,6 +178,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             await store.set('uiLanguage', state.uiLanguage)
 
             await store.save()
+
+            // Register hotkeys with backend
+            try {
+                await invoke('register_hotkeys', { hotkeys: state.hotkeys })
+            } catch (error) {
+                console.error('Failed to update hotkeys:', error)
+            }
         } catch (error) {
             console.error('Failed to save settings:', error)
             throw error

@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HotkeyAction {
+    #[serde(rename = "action")]
     pub name: String,
     pub shortcut: String,
 }

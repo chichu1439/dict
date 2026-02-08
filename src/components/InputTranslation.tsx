@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import TranslationResult from './TranslationResult'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -21,14 +21,49 @@ export default function InputTranslation({ initialText }: { initialText?: string
   const [results, setResults] = useState<TranslationService[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
+  // Handle initial text and external events
   useEffect(() => {
     if (initialText) {
       setInputText(initialText)
-      // Optional: Auto-trigger translation if desired, but maybe let user click button
-      // handleTranslate() 
+      // Auto-trigger translation for shortcut-triggered text
+      setTimeout(() => {
+        handleTranslate()
+      }, 300)
     }
   }, [initialText])
+
+  // Handle external events
+  useEffect(() => {
+    const handleSelectTranslation = (e: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent.detail) {
+        const text = customEvent.detail;
+        console.log('Select translation event received:', text);
+        setInputText(text);
+        setTimeout(() => {
+          handleTranslate();
+        }, 200);
+      }
+    };
+
+    const handleFocusInput = () => {
+      console.log('Focus input event received');
+      if (inputRef.current) {
+        inputRef.current.focus();
+        inputRef.current.select();
+      }
+    };
+
+    window.addEventListener('trigger-select-translation', handleSelectTranslation);
+    window.addEventListener('focus-translation-input', handleFocusInput);
+
+    return () => {
+      window.removeEventListener('trigger-select-translation', handleSelectTranslation);
+      window.removeEventListener('focus-translation-input', handleFocusInput);
+    };
+  }, []);
 
   const { services, sourceLang: defaultSource, targetLang: defaultTarget, loaded, loadSettings, uiLanguage } = useSettingsStore()
   const { addToHistory } = useHistoryStore()
@@ -87,6 +122,13 @@ export default function InputTranslation({ initialText }: { initialText?: string
         }
       }
 
+      console.log('Sending translation request:', {
+        text: inputText,
+        source_lang: detected,
+        target_lang: target,
+        services: serviceNames,
+      });
+
       const response = await invoke<TranslationResponse>('translate', {
         request: {
           text: inputText,
@@ -97,7 +139,7 @@ export default function InputTranslation({ initialText }: { initialText?: string
         }
       })
 
-      console.log('Results received:', response)
+      console.log('Translation results received:', response)
       setResults(response.results)
 
       // Add to history
@@ -105,7 +147,7 @@ export default function InputTranslation({ initialText }: { initialText?: string
         addToHistory({
           id: uuidv4(),
           sourceText: inputText,
-          targetText: response.results.map(r => r.text).join(' '), // Store combined text or handle differently
+          targetText: response.results.map(r => r.text).join(' '),
           sourceLang: detected,
           targetLang: target,
           services: response.results.map(r => r.name),
@@ -115,10 +157,8 @@ export default function InputTranslation({ initialText }: { initialText?: string
       }
     } catch (error) {
       console.error('Translation error:', error)
-      setResults([]) // Clear results on error
-      // TODO: Add visual error feedback
+      setResults([])
       const errorStr = String(error);
-      // 改进错误提示，显示具体服务配置问题
       if (errorStr.includes('API key') || errorStr.includes('access')) {
         alert('Translation Error: Please configure API keys in Settings > Services for the enabled translation services.');
       } else {
@@ -131,7 +171,15 @@ export default function InputTranslation({ initialText }: { initialText?: string
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
       handleTranslate()
+    }
+  }
+
+  const clearInput = () => {
+    setInputText('')
+    if (inputRef.current) {
+      inputRef.current.focus()
     }
   }
 
@@ -142,6 +190,7 @@ export default function InputTranslation({ initialText }: { initialText?: string
           <div className="relative group">
             <div className="absolute -inset-0.5 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl opacity-30 group-hover:opacity-60 transition duration-500 blur"></div>
             <textarea
+              ref={inputRef}
               value={inputText}
               onChange={e => setInputText(e.target.value)}
               onKeyDown={handleKeyDown}
@@ -206,6 +255,18 @@ export default function InputTranslation({ initialText }: { initialText?: string
                 t.translateBtn
               )}
             </button>
+
+            {inputText.trim() && (
+              <button
+                onClick={clearInput}
+                className="p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                title="Clear input"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            )}
           </div>
         </div>
 
