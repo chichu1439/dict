@@ -7,6 +7,8 @@ use crate::ocr::models::{OcrRequest, OcrResult as AppOcrResult};
 use windows::{
     Graphics::Imaging::BitmapDecoder,
     Media::Ocr::OcrEngine,
+    Globalization::Language,
+    core::HSTRING,
     Storage::Streams::{InMemoryRandomAccessStream, DataWriter},
     Win32::Graphics::Gdi::{GetDC, CreateCompatibleDC, CreateCompatibleBitmap, SelectObject, BitBlt, GetDIBits, SRCCOPY, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, DeleteObject, DeleteDC, ReleaseDC},
     Win32::UI::WindowsAndMessaging::GetDesktopWindow,
@@ -18,7 +20,7 @@ use base64::{Engine as _, engine::general_purpose};
 // Cross-platform screenshot capture trait
 pub trait ScreenshotCapture {
     fn capture_screen(&self, x: i32, y: i32, w: i32, h: i32) -> Result<String, String>;
-    fn capture_and_ocr(&self, x: i32, y: i32, w: i32, h: i32) -> Result<AppOcrResult, String>;
+    fn capture_and_ocr(&self, x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<AppOcrResult, String>;
 }
 
 // Windows implementation
@@ -32,10 +34,10 @@ impl ScreenshotCapture for WindowsOcr {
         Ok(general_purpose::STANDARD.encode(&bmp_data))
     }
     
-    fn capture_and_ocr(&self, x: i32, y: i32, w: i32, h: i32) -> Result<AppOcrResult, String> {
+    fn capture_and_ocr(&self, x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<AppOcrResult, String> {
         let bmp_data = unsafe { capture_bitmap(x, y, w, h)? };
         let rt = tokio::runtime::Handle::current();
-        rt.block_on(recognize_bytes(bmp_data))
+        rt.block_on(recognize_bytes(bmp_data, language))
     }
 }
 
@@ -49,7 +51,7 @@ impl ScreenshotCapture for FallbackOcr {
         Err("Screenshot capture requires native implementation. Use external tools or implement platform-specific capture.".to_string())
     }
     
-    fn capture_and_ocr(&self, _x: i32, _y: i32, _w: i32, _h: i32) -> Result<AppOcrResult, String> {
+    fn capture_and_ocr(&self, _x: i32, _y: i32, _w: i32, _h: i32, _language: Option<String>) -> Result<AppOcrResult, String> {
         Err("Native OCR not available on this platform. Consider using Tesseract.js or cloud OCR services.".to_string())
     }
 }
@@ -148,7 +150,7 @@ unsafe fn capture_bitmap(x: i32, y: i32, w: i32, h: i32) -> Result<Vec<u8>, Stri
 
 // Windows-specific OCR implementation
 #[cfg(target_os = "windows")]
-async fn recognize_bytes(image_data: Vec<u8>) -> Result<AppOcrResult, String> {
+async fn recognize_bytes(image_data: Vec<u8>, language: Option<String>) -> Result<AppOcrResult, String> {
     // Create stream from bytes
     let stream = InMemoryRandomAccessStream::new()
         .map_err(|e| format!("Failed to create stream: {}", e))?;
@@ -198,9 +200,27 @@ async fn recognize_bytes(image_data: Vec<u8>) -> Result<AppOcrResult, String> {
     println!("Software bitmap created successfully");
 
     // OCR
-    println!("Creating Windows OCR engine from user profile languages...");
-    let engine = OcrEngine::TryCreateFromUserProfileLanguages()
-        .map_err(|e| format!("Failed to create OCR engine from user profile: {}", e))?;
+    println!("Creating Windows OCR engine...");
+    let engine = match language.as_deref() {
+        Some(lang) if lang != "auto" => {
+            let tag = match lang {
+                "zh" => "zh-Hans",
+                "en" => "en-US",
+                "ja" => "ja-JP",
+                "ko" => "ko-KR",
+                other => other,
+            };
+            let h = HSTRING::from(tag);
+            let l = Language::CreateLanguage(&h)
+                .map_err(|e| format!("Failed to create language: {}", e))?;
+            OcrEngine::TryCreateFromLanguage(&l)
+                .map_err(|e| format!("Failed to create OCR engine from language: {}", e))?
+        }
+        _ => {
+            OcrEngine::TryCreateFromUserProfileLanguages()
+                .map_err(|e| format!("Failed to create OCR engine from user profile: {}", e))?
+        }
+    };
     
     println!("Windows OCR engine created successfully");
 
@@ -282,7 +302,7 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
 
     #[cfg(target_os = "windows")]
     {
-        match recognize_bytes(image_data).await {
+        match recognize_bytes(image_data, request.language).await {
             Ok(result) => {
                 println!("OCR completed successfully, text length: {}", result.text.len());
                 Ok(result)
@@ -307,8 +327,8 @@ pub async fn capture_screen(x: i32, y: i32, w: i32, h: i32) -> Result<String, St
 }
 
 // Combined screenshot and OCR function
-pub async fn capture_and_ocr(x: i32, y: i32, w: i32, h: i32) -> Result<AppOcrResult, String> {
+pub async fn capture_and_ocr(x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<AppOcrResult, String> {
     println!("Capturing and performing OCR at ({}, {}) size ({}x{})", x, y, w, h);
     let ocr_impl = get_ocr_impl();
-    ocr_impl.capture_and_ocr(x, y, w, h)
+    ocr_impl.capture_and_ocr(x, y, w, h, language)
 }

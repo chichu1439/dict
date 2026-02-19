@@ -42,12 +42,12 @@ export default function History({ onClose, onSelect }: { onClose: () => void; on
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-800 rounded-lg w-full max-w-3xl max-h-[90vh] overflow-hidden m-4 flex flex-col shadow-2xl">
-        <header className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{t.title}</h2>
+      <div className="bg-[var(--ui-surface)] rounded-xl w-full max-w-3xl max-h-[90vh] overflow-hidden m-4 flex flex-col shadow-2xl border border-[var(--ui-border)]">
+        <header className="flex items-center justify-between p-4 border-b border-[var(--ui-border)] flex-shrink-0">
+          <h2 className="text-lg font-semibold text-[var(--ui-text)]">{t.title}</h2>
           <button
             onClick={onClose}
-            className="w-8 h-8 rounded hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center flex-shrink-0 text-gray-500 dark:text-gray-400"
+            className="w-8 h-8 rounded hover:bg-[var(--ui-surface-2)] flex items-center justify-center flex-shrink-0 text-[var(--ui-muted)] cursor-pointer"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -55,19 +55,19 @@ export default function History({ onClose, onSelect }: { onClose: () => void; on
           </button>
         </header>
 
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+        <div className="p-4 border-b border-[var(--ui-border)] flex-shrink-0">
           <input
             type="text"
             value={searchQuery}
             onChange={e => handleSearch(e.target.value)}
             placeholder={t.searchPlaceholder}
-            className="w-full bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-lg px-4 py-3 text-gray-900 dark:text-white focus:outline-none focus:border-blue-500"
+            className="w-full bg-[var(--ui-surface-2)] border border-[var(--ui-border)] rounded-lg px-4 py-3 text-[var(--ui-text)] focus:outline-none focus:border-[var(--ui-accent)]"
           />
         </div>
 
         <div className="flex-1 overflow-auto p-4">
           {filteredHistory.length === 0 ? (
-            <div className="flex items-center justify-center py-12 text-gray-400 dark:text-gray-500">
+            <div className="flex items-center justify-center py-12 text-[var(--ui-muted)]">
               <p className="text-sm">{t.noHistory}</p>
             </div>
           ) : (
@@ -75,21 +75,21 @@ export default function History({ onClose, onSelect }: { onClose: () => void; on
               {filteredHistory.map((item: any) => (
                 <div
                   key={item.id}
-                  className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors border border-gray-200 dark:border-transparent"
+                  className="bg-[var(--ui-surface-2)] rounded-lg p-4 hover:bg-[var(--ui-surface)] transition-colors border border-[var(--ui-border)]"
                 >
                   <div className="flex items-start justify-between mb-2">
                     <div 
                       className="flex-1 min-w-0 cursor-pointer" 
                       onClick={() => handleSelect(item)}
                     >
-                      <p className="text-gray-900 dark:text-white text-base break-words">{item.sourceText}</p>
-                      <p className="text-gray-600 dark:text-gray-300 text-sm mt-1 break-words">{item.targetText}</p>
+                      <p className="text-[var(--ui-text)] text-base break-words">{item.sourceText}</p>
+                      <p className="text-[var(--ui-muted)] text-sm mt-1 break-words">{item.targetText}</p>
                     </div>
                     <div className="flex items-center gap-2 flex-shrink-0 ml-2">
                       <button
                         onClick={() => toggleFavorite(item.id)}
-                        className={`p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-500 transition-colors ${
-                          item.isFavorite ? 'text-yellow-500' : 'text-gray-400 dark:text-gray-500'
+                        className={`p-1 rounded hover:bg-[var(--ui-surface)] transition-colors cursor-pointer ${
+                          item.isFavorite ? 'text-[var(--ui-accent)]' : 'text-[var(--ui-muted)]'
                         }`}
                         title={item.isFavorite ? t.removeFromFavorites : t.addToFavorites}
                       >
@@ -103,7 +103,7 @@ export default function History({ onClose, onSelect }: { onClose: () => void; on
                       </button>
                       <button
                         onClick={() => handleSelect(item)}
-                        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-500 text-gray-400 dark:text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"
+                        className="p-1 rounded hover:bg-[var(--ui-surface)] text-[var(--ui-muted)] hover:text-[var(--ui-text)] transition-colors cursor-pointer"
                         title={t.reTranslate}
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -112,7 +112,7 @@ export default function History({ onClose, onSelect }: { onClose: () => void; on
                       </button>
                       <button
                         onClick={() => handleDelete(item.id)}
-                        className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-500 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+                        className="p-1 rounded hover:bg-[var(--ui-surface)] text-[var(--ui-muted)] hover:text-red-500 transition-colors cursor-pointer"
                         title={tCommon.delete}
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -121,7 +121,7 @@ export default function History({ onClose, onSelect }: { onClose: () => void; on
                       </button>
                     </div>
                   </div>
-                  <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                  <div className="flex items-center justify-between text-xs text-[var(--ui-muted)]">
                     <span>{formatDate(item.timestamp)}</span>
                     <span>{item.services.join(', ')}</span>
                   </div>
@@ -131,16 +131,16 @@ export default function History({ onClose, onSelect }: { onClose: () => void; on
           )}
         </div>
 
-        <footer className="p-4 border-t border-gray-200 dark:border-gray-700 flex justify-between items-center flex-shrink-0">
+        <footer className="p-4 border-t border-[var(--ui-border)] flex justify-between items-center flex-shrink-0">
           <button
             onClick={handleClearAll}
-            className="px-4 py-2 text-sm font-medium text-red-500 dark:text-red-400 hover:text-red-600 dark:hover:text-red-300 transition-colors"
+            className="px-4 py-2 text-sm font-medium text-red-500 hover:text-red-600 transition-colors cursor-pointer"
           >
             {t.clearAll}
           </button>
           <button
             onClick={onClose}
-            className="px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 rounded text-sm font-medium text-gray-900 dark:text-white transition-colors"
+            className="px-4 py-2 bg-[var(--ui-surface-2)] hover:bg-[var(--ui-surface)] rounded-lg text-sm font-medium text-[var(--ui-text)] transition-colors cursor-pointer"
           >
             {tCommon.close}
           </button>

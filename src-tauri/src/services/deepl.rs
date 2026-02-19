@@ -41,7 +41,11 @@ pub async fn translate(
         _ => "EN-US",
     };
 
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+        
     let response = client
         .post("https://api-free.deepl.com/v2/translate")
         .header("Authorization", format!("DeepL-Auth-Key {}", api_key))

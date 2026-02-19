@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 pub struct OcrRequest {
     pub image_data: Option<String>,
     pub image_path: Option<String>,
+    pub language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

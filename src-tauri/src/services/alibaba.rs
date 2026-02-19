@@ -48,7 +48,10 @@ pub async fn translate(
         .or_else(|| read_env("ALIBABA_ACCESS_KEY_SECRET").ok())
         .ok_or_else(|| "ALIBABA_ACCESS_KEY_SECRET not found".to_string())?;
 
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(3))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     let url = "https://mt.aliyuncs.com/";
 
     let mut params = BTreeMap::new();

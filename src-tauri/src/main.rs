@@ -17,13 +17,18 @@ async fn translate(request: TranslationRequest) -> Result<TranslationResponse, S
 }
 
 #[tauri::command]
+async fn translate_stream(app: tauri::AppHandle, request: TranslationRequest, request_id: String) -> Result<(), String> {
+    services::translate_stream(app, request, request_id).await
+}
+
+#[tauri::command]
 async fn ocr(request: OcrRequest) -> Result<OcrResult, String> {
     ocr::perform_ocr(request).await
 }
 
 #[tauri::command]
-async fn capture_and_ocr(x: i32, y: i32, w: i32, h: i32) -> Result<OcrResult, String> {
-    ocr::capture_and_ocr(x, y, w, h).await
+async fn capture_and_ocr(x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<OcrResult, String> {
+    ocr::capture_and_ocr(x, y, w, h, language).await
 }
 
 #[tauri::command]
@@ -90,7 +95,7 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, shortcut, _event| {
             hotkey::handle_shortcut(app, shortcut);
         }).build())
-        .invoke_handler(tauri::generate_handler![translate, ocr, capture_and_ocr, capture_screen, speak, hotkey::get_hotkeys, hotkey::set_hotkey, hotkey::register_hotkeys, hotkey::clear_hotkey_processing, get_mouse_monitor])
+        .invoke_handler(tauri::generate_handler![translate, translate_stream, ocr, capture_and_ocr, capture_screen, speak, hotkey::get_hotkeys, hotkey::set_hotkey, hotkey::register_hotkeys, hotkey::clear_hotkey_processing, get_mouse_monitor])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

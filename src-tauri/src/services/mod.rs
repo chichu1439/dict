@@ -5,6 +5,8 @@ pub mod alibaba;
 pub mod google_free;
 
 use crate::models::{TranslationRequest, TranslationResponse, TranslationResult};
+use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 
 pub async fn translate(
     request: TranslationRequest
@@ -280,39 +282,250 @@ pub async fn translate(
     }
 
     println!("Waiting for all translation services to complete...");
-    let mut successful_results = Vec::new();
-    let mut failed_services = Vec::new();
+    let mut final_results = Vec::new();
 
     for handle in handles {
         match handle.await {
             Ok(result) => {
-                if result.error.is_none() && !result.text.is_empty() {
-                    println!("Service {} completed successfully", result.name);
-                    successful_results.push(result);
-                } else if let Some(error) = &result.error {
+                if let Some(error) = &result.error {
                     println!("Service {} failed with error: {}", result.name, error);
-                    failed_services.push(format!("{}: {}", result.name, error));
                 } else {
-                    println!("Service {} returned empty result", result.name);
-                    failed_services.push(format!("{}: Empty result", result.name));
+                    println!("Service {} completed successfully", result.name);
                 }
+                final_results.push(result);
             }
             Err(e) => {
                 println!("Translation task failed: {}", e);
-                failed_services.push(format!("Task error: {}", e));
             }
         }
     }
 
-    println!("Translation completed. Successful: {}, Failed: {}", successful_results.len(), failed_services.len());
+    println!("Translation completed. Total results: {}", final_results.len());
 
-    if successful_results.is_empty() {
-        if failed_services.is_empty() {
-            return Err("No translation services returned results".to_string());
-        } else {
-            return Err(format!("All translation services failed:\n{}", failed_services.join("\n")));
-        }
+    if final_results.is_empty() {
+        return Err("No translation services returned results".to_string());
     }
 
-    Ok(TranslationResponse { results: successful_results })
+    Ok(TranslationResponse { results: final_results })
+}
+
+#[derive(Serialize, Clone)]
+struct StreamPayload {
+    request_id: String,
+    service: String,
+    delta: Option<String>,
+    text: Option<String>,
+    error: Option<String>,
+    done: bool,
+    all_done: bool,
+}
+
+pub async fn translate_stream(app: AppHandle, request: TranslationRequest, request_id: String) -> Result<(), String> {
+    let services = if request.services.is_empty() {
+        vec!["OpenAI".to_string(), "DeepL".to_string(), "Alibaba".to_string(), "GoogleFree".to_string()]
+    } else {
+        request.services
+    };
+
+    let mut handles = Vec::new();
+
+    for service in services {
+        let text = request.text.clone();
+        let source_lang = request.source_lang.clone();
+        let target_lang = request.target_lang.clone();
+        let config = request.config.clone();
+        let service_name = service.clone();
+        let app_handle = app.clone();
+        let request_id_clone = request_id.clone();
+
+        let handle = tokio::spawn(async move {
+            let service_config = config.as_ref().and_then(|c| c.get(&service_name.to_lowercase()));
+
+            let emit = |payload: StreamPayload| {
+                let _ = app_handle.emit("translation-stream", payload);
+            };
+
+            let mut emit_error = |error: String| {
+                emit(StreamPayload {
+                    request_id: request_id_clone.clone(),
+                    service: service_name.clone(),
+                    delta: None,
+                    text: None,
+                    error: Some(error),
+                    done: true,
+                    all_done: false,
+                });
+            };
+
+            match service_name.to_lowercase().as_str() {
+                "openai" | "zhipu" | "groq" | "gemini" => {
+                    let has_api_key = service_config
+                        .and_then(|config| config.get("apiKey"))
+                        .and_then(|key| key.as_str())
+                        .map(|key| !key.is_empty())
+                        .unwrap_or(false);
+
+                    if !has_api_key {
+                        emit_error("No API key configured".to_string());
+                        return;
+                    }
+
+                    let mut config_obj = service_config.cloned().unwrap_or(serde_json::json!({}));
+                    if let Some(obj) = config_obj.as_object_mut() {
+                        match service_name.to_lowercase().as_str() {
+                            "zhipu" => {
+                                obj.entry("apiUrl".to_string())
+                                    .or_insert(serde_json::Value::String("https://open.bigmodel.cn/api/paas/v4/chat/completions".to_string()));
+                                obj.entry("model".to_string())
+                                    .or_insert(serde_json::Value::String("glm-4-flash".to_string()));
+                            }
+                            "groq" => {
+                                obj.entry("apiUrl".to_string())
+                                    .or_insert(serde_json::Value::String("https://api.groq.com/openai/v1/chat/completions".to_string()));
+                                obj.entry("model".to_string())
+                                    .or_insert(serde_json::Value::String("llama3-8b-8192".to_string()));
+                            }
+                            "gemini" => {
+                                obj.entry("apiUrl".to_string())
+                                    .or_insert(serde_json::Value::String("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".to_string()));
+                                obj.entry("model".to_string())
+                                    .or_insert(serde_json::Value::String("gemini-1.5-flash".to_string()));
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    let mut streamed_text = String::new();
+                    let result = openai::translate_stream(
+                        &text,
+                        &source_lang,
+                        &target_lang,
+                        Some(&config_obj),
+                        |delta| {
+                            streamed_text.push_str(delta);
+                            emit(StreamPayload {
+                                request_id: request_id_clone.clone(),
+                                service: service_name.clone(),
+                                delta: Some(delta.to_string()),
+                                text: None,
+                                error: None,
+                                done: false,
+                                all_done: false,
+                            });
+                        },
+                    )
+                    .await;
+
+                    match result {
+                        Ok(final_text) => {
+                            emit(StreamPayload {
+                                request_id: request_id_clone.clone(),
+                                service: service_name.clone(),
+                                delta: None,
+                                text: Some(final_text),
+                                error: None,
+                                done: true,
+                                all_done: false,
+                            });
+                        }
+                        Err(e) => {
+                            emit_error(e);
+                        }
+                    }
+                }
+                "deepl" => {
+                    match deepl::translate(&text, &source_lang, &target_lang, service_config).await {
+                        Ok(mut result) => {
+                            result.error = None;
+                            emit(StreamPayload {
+                                request_id: request_id_clone.clone(),
+                                service: result.name,
+                                delta: None,
+                                text: Some(result.text),
+                                error: None,
+                                done: true,
+                                all_done: false,
+                            });
+                        }
+                        Err(e) => emit_error(e),
+                    }
+                }
+                "google" => {
+                    match google::translate(&text, &source_lang, &target_lang, service_config).await {
+                        Ok(mut result) => {
+                            result.error = None;
+                            emit(StreamPayload {
+                                request_id: request_id_clone.clone(),
+                                service: result.name,
+                                delta: None,
+                                text: Some(result.text),
+                                error: None,
+                                done: true,
+                                all_done: false,
+                            });
+                        }
+                        Err(e) => emit_error(e),
+                    }
+                }
+                "alibaba" => {
+                    match alibaba::translate(&text, &source_lang, &target_lang, service_config).await {
+                        Ok(mut result) => {
+                            result.error = None;
+                            emit(StreamPayload {
+                                request_id: request_id_clone.clone(),
+                                service: result.name,
+                                delta: None,
+                                text: Some(result.text),
+                                error: None,
+                                done: true,
+                                all_done: false,
+                            });
+                        }
+                        Err(e) => emit_error(e),
+                    }
+                }
+                "googlefree" | "google native" => {
+                    match google_free::translate(&text, &source_lang, &target_lang, service_config).await {
+                        Ok(mut result) => {
+                            result.error = None;
+                            emit(StreamPayload {
+                                request_id: request_id_clone.clone(),
+                                service: result.name,
+                                delta: None,
+                                text: Some(result.text),
+                                error: None,
+                                done: true,
+                                all_done: false,
+                            });
+                        }
+                        Err(e) => emit_error(e),
+                    }
+                }
+                _ => {
+                    emit_error("Service not supported".to_string());
+                }
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        let _ = handle.await;
+    }
+
+    let _ = app.emit(
+        "translation-stream",
+        StreamPayload {
+            request_id,
+            service: "".to_string(),
+            delta: None,
+            text: None,
+            error: None,
+            done: true,
+            all_done: true,
+        },
+    );
+
+    Ok(())
 }

@@ -28,7 +28,11 @@ pub async fn translate(
 
     match api_key {
         Some(key) => {
-            let client = reqwest::Client::new();
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+                
             let url = format!(
                 "https://translation.googleapis.com/language/translate/v2?key={}",
                 key

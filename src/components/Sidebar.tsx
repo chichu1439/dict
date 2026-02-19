@@ -4,9 +4,12 @@ import { en, zh } from '../locales'
 interface SidebarProps {
   activeTab: string
   onTabChange: (tab: string) => void
+  onThemeToggle: () => void
+  themeLabel: string
+  themeIsGold: boolean
 }
 
-export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
+export default function Sidebar({ activeTab, onTabChange, onThemeToggle, themeLabel, themeIsGold }: SidebarProps) {
   const { uiLanguage } = useSettingsStore()
   const t = uiLanguage === 'zh' ? zh.sidebar : en.sidebar
 
@@ -18,40 +21,50 @@ export default function Sidebar({ activeTab, onTabChange }: SidebarProps) {
   ]
 
   return (
-    <div className="w-16 h-full bg-white/50 dark:bg-gray-900/50 backdrop-blur-xl border-r border-gray-200 dark:border-white/5 flex flex-col items-center py-6 gap-6 z-20 transition-colors duration-300">
-      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center shadow-lg mb-4">
-        <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div className="w-[76px] h-full bg-[var(--ui-surface)] border-r border-[var(--ui-border)] flex flex-col items-center py-6 gap-6 z-20">
+      <div className="w-10 h-10 rounded-xl bg-[var(--ui-text)] text-[var(--ui-accent)] flex items-center justify-center shadow-md shadow-black/10 mb-2">
+        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129" />
         </svg>
       </div>
 
-      <nav className="flex flex-col gap-2 w-full px-2">
+      <nav className="flex flex-col gap-3 w-full px-3">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
-            className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all duration-300 group relative ${
+            className={`w-14 h-14 rounded-xl flex items-center justify-center transition-all duration-200 group relative cursor-pointer ${
               activeTab === tab.id
-                ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/30'
-                : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white'
+                ? 'bg-[var(--ui-surface-2)] text-[var(--ui-text)] ring-1 ring-[var(--ui-accent)]'
+                : 'text-[var(--ui-muted)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]'
             }`}
             title={tab.label}
           >
-            <svg className="w-5 h-5" fill={tab.id === 'favorites' ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
+            <svg className="w-6 h-6" fill={tab.id === 'favorites' && activeTab === tab.id ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={tab.icon} />
             </svg>
-            
-            {/* Tooltip */}
-            <div className="absolute left-14 bg-white dark:bg-gray-900 text-gray-900 dark:text-white text-xs px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap border border-gray-200 dark:border-white/10 shadow-md z-50">
-              {tab.label}
-            </div>
           </button>
         ))}
       </nav>
-      
-      <div className="flex-1" />
-      
-      <div className="w-8 h-8 rounded-full bg-gradient-to-r from-gray-200 to-gray-300 dark:from-gray-700 dark:to-gray-600 border border-gray-300 dark:border-white/10"></div>
+
+      <div className="mt-auto pb-4">
+        <button
+          onClick={onThemeToggle}
+          className="w-14 h-14 rounded-xl flex items-center justify-center transition-all duration-200 group relative cursor-pointer text-[var(--ui-muted)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]"
+          title={themeLabel}
+        >
+          <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-[var(--ui-accent)] shadow-[0_0_8px_rgba(212,175,55,0.6)]" />
+          {themeIsGold ? (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.364-6.364-1.414 1.414M7.05 16.95l-1.414 1.414M16.95 16.95l1.414 1.414M7.05 7.05 5.636 5.636" />
+            </svg>
+          ) : (
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12.79A9 9 0 1111.21 3a7 7 0 109.79 9.79z" />
+            </svg>
+          )}
+        </button>
+      </div>
     </div>
   )
 }
