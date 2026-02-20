@@ -1,5 +1,6 @@
-﻿import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow, PhysicalPosition, PhysicalSize } from '@tauri-apps/api/window'
 import { useSettingsStore } from '../stores/settingsStore'
 
@@ -15,10 +16,12 @@ export default function ScreenshotTranslation() {
   const [isActive, setIsActive] = useState(false) // Control whether component is active
   const [isSelecting, setIsSelecting] = useState(false)
   const [hasStartedSelection, setHasStartedSelection] = useState(false) // Track if user has actually started dragging
+  const [isProcessing, setIsProcessing] = useState(false) // New: Track processing state
   const [screenshotImage, setScreenshotImage] = useState('')
+  // We removed local image storage, we will rely on backend to capture
   const [startPos, setStartPos] = useState({ x: 0, y: 0 })
   const [currentPos, setCurrentPos] = useState({ x: 0, y: 0 })
-  const preCaptureStateRef = useRef<{ position: { x: number; y: number }; size: { width: number; height: number }; maximized: boolean } | null>(null)
+  // Removed preCaptureStateRef as it's no longer needed for overlay window
   const monitorRef = useRef<MonitorInfo | null>(null)
 
   const { ocrLanguage, ocrMode, ocrEnhance, ocrLimitMaxSize, ocrMaxDimension, ocrShowResult } = useSettingsStore()
@@ -91,6 +94,12 @@ export default function ScreenshotTranslation() {
         // x, y, w, h are in CSS pixels, so we scale them by dpr to find source coordinates
         ctx.drawImage(img, x * dpr, y * dpr, safeW, safeH, 0, 0, safeW, safeH);
         
+        // Removed filter - let the preprocess stage handle any necessary enhancements
+        // This ensures cropImage just returns the raw cropped data
+        // ctx.filter = 'contrast(1.2) brightness(1.05) grayscale(1)';
+        // ctx.drawImage(canvas, 0, 0);
+        // ctx.filter = 'none';
+
         const data = canvas.toDataURL('image/png');
         resolve(data.split(',')[1]);
       };
@@ -100,16 +109,26 @@ export default function ScreenshotTranslation() {
   }
 
   const preprocessImage = async (base64Png: string, options: { enhance: boolean; mode: 'accuracy' | 'speed'; limitMaxSize: boolean; maxDimension: number }): Promise<string> => {
+    // If enhancement is disabled and no resizing needed, return original immediately
+    if (!options.enhance && !options.limitMaxSize) {
+       return base64Png;
+    }
+
     return new Promise((resolve, reject) => {
       const img = new Image();
       img.onload = () => {
         const maxDim = Math.max(img.width, img.height);
         let scaleFactor = 1;
 
+        // Only scale down if significantly larger than needed
         if (options.limitMaxSize && options.maxDimension > 0 && maxDim > options.maxDimension) {
           scaleFactor = options.maxDimension / maxDim;
-        } else if (options.mode === 'accuracy' && maxDim < 900) {
-          scaleFactor = Math.min(1.8, 900 / maxDim);
+        } 
+        // Restore upscaling for small images to improve OCR accuracy
+        // Tesseract prefers ~300 DPI, screen is usually 96 DPI. So 2x-3x scaling helps small text.
+        else if (options.mode === 'accuracy' && maxDim < 1000) {
+           // Scale up small images, but cap at reasonable size
+           scaleFactor = Math.min(2.5, 2000 / maxDim);
         }
 
         const canvas = document.createElement('canvas');
@@ -119,105 +138,34 @@ export default function ScreenshotTranslation() {
         const ctx = canvas.getContext('2d');
         if (!ctx) return reject('No context');
 
+        // Use high quality scaling
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
+        // Draw image
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
         if (options.enhance) {
+          // Apply gentle enhancement
+          // For screen text, we want to increase contrast but avoid aggressive binarization that merges strokes
           const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const data = imageData.data;
-          const w = canvas.width;
-          const h = canvas.height;
-          const gray = new Uint8ClampedArray(w * h);
 
-          for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
+          for (let i = 0; i < data.length; i += 4) {
             const r = data[i];
             const g = data[i + 1];
             const b = data[i + 2];
-            gray[p] = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-          }
+            
+            // Grayscale
+            let v = 0.299 * r + 0.587 * g + 0.114 * b;
+            
+            // Gentle Contrast stretching
+            // Less aggressive than before to preserve anti-aliasing details
+            v = (v - 128) * 1.5 + 128; 
+            
+            // Clamp
+            v = Math.max(0, Math.min(255, v));
 
-          const boxBlur = (src: Uint8ClampedArray, width: number, height: number) => {
-            const dst = new Uint8ClampedArray(src.length);
-            for (let y = 0; y < height; y += 1) {
-              for (let x = 0; x < width; x += 1) {
-                let sum = 0;
-                let count = 0;
-                for (let dy = -1; dy <= 1; dy += 1) {
-                  const ny = y + dy;
-                  if (ny < 0 || ny >= height) continue;
-                  for (let dx = -1; dx <= 1; dx += 1) {
-                    const nx = x + dx;
-                    if (nx < 0 || nx >= width) continue;
-                    sum += src[ny * width + nx];
-                    count += 1;
-                  }
-                }
-                dst[y * width + x] = Math.round(sum / count);
-              }
-            }
-            return dst;
-          };
-
-          const sharpen = (src: Uint8ClampedArray, width: number, height: number) => {
-            const dst = new Uint8ClampedArray(src.length);
-            for (let y = 0; y < height; y += 1) {
-              for (let x = 0; x < width; x += 1) {
-                const idx = y * width + x;
-                const c = src[idx];
-                const up = y > 0 ? src[(y - 1) * width + x] : c;
-                const down = y < height - 1 ? src[(y + 1) * width + x] : c;
-                const left = x > 0 ? src[y * width + (x - 1)] : c;
-                const right = x < width - 1 ? src[y * width + (x + 1)] : c;
-                const v = 5 * c - up - down - left - right;
-                dst[idx] = Math.max(0, Math.min(255, v));
-              }
-            }
-            return dst;
-          };
-
-          const otsuThreshold = (src: Uint8ClampedArray) => {
-            const hist = new Array(256).fill(0);
-            for (let i = 0; i < src.length; i += 1) hist[src[i]] += 1;
-            const total = src.length;
-            let sum = 0;
-            for (let t = 0; t < 256; t += 1) sum += t * hist[t];
-
-            let sumB = 0;
-            let wB = 0;
-            let wF = 0;
-            let varMax = 0;
-            let threshold = 128;
-
-            for (let t = 0; t < 256; t += 1) {
-              wB += hist[t];
-              if (wB === 0) continue;
-              wF = total - wB;
-              if (wF === 0) break;
-              sumB += t * hist[t];
-              const mB = sumB / wB;
-              const mF = (sum - sumB) / wF;
-              const varBetween = wB * wF * (mB - mF) * (mB - mF);
-              if (varBetween > varMax) {
-                varMax = varBetween;
-                threshold = t;
-              }
-            }
-            return threshold;
-          };
-
-          let processed = gray;
-          if (options.mode === 'accuracy') {
-            processed = boxBlur(processed, w, h);
-            processed = sharpen(processed, w, h);
-            const threshold = otsuThreshold(processed);
-            for (let i = 0; i < processed.length; i += 1) {
-              processed[i] = processed[i] >= threshold ? 255 : 0;
-            }
-          } else {
-            processed = sharpen(processed, w, h);
-          }
-
-          for (let i = 0, p = 0; i < data.length; i += 4, p += 1) {
-            const v = processed[p];
             data[i] = v;
             data[i + 1] = v;
             data[i + 2] = v;
@@ -234,7 +182,8 @@ export default function ScreenshotTranslation() {
   }
 
   const endSelection = useCallback(async (e: React.MouseEvent) => {
-    if (!isSelecting) return
+    // Must check hasStartedSelection to avoid accidental triggers
+    if (!isSelecting || isProcessing || !hasStartedSelection) return
     e.preventDefault()
 
     const width = Math.abs(e.clientX - startPos.x)
@@ -246,24 +195,28 @@ export default function ScreenshotTranslation() {
     if (width < 10 || height < 10) {
       window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Selection too small, cancelling' }));
       
-      // Show user-friendly notification
-      const event = new CustomEvent('show-notification', {
-        detail: {
-          type: 'warning',
-          title: 'Selection too small',
-          message: 'Please select a larger area for accurate OCR.'
-        }
-      });
-      window.dispatchEvent(event);
+      // Don't show notification for tiny clicks/mistakes, just reset selection
+      // Only show if it was clearly an attempt (e.g. > 2px but < 10px)
+      if (width > 2 && height > 2) {
+        const event = new CustomEvent('show-notification', {
+          detail: {
+            type: 'warning',
+            title: 'Selection too small',
+            message: 'Please select a larger area for accurate OCR.'
+          }
+        });
+        window.dispatchEvent(event);
+      }
       
-      setIsSelecting(false)
+      // Just reset the selection state, don't close the window!
+      // User might want to try again.
       setHasStartedSelection(false)
-      restoreWindow()
+      // restoreWindow() // Removed: Don't close window on small selection
       return
     }
 
-    setIsSelecting(false)
-    setHasStartedSelection(false)
+    // Don't close selection UI immediately, show processing state
+    setIsProcessing(true)
     
     // Calculate selection coordinates (CSS pixels)
     const x = Math.min(startPos.x, e.clientX)
@@ -271,23 +224,26 @@ export default function ScreenshotTranslation() {
 
     window.dispatchEvent(new CustomEvent('debug-log', { detail: `Processing capture at (${x}, ${y}) size ${width}x${height}` }));
 
-    await processCapture(x, y, width, height)
+    try {
+      await processCapture(x, y, width, height)
+    } catch (error) {
+      console.error('Process capture failed:', error)
+      setIsProcessing(false) // Reset on error if not handled inside
+      // If error, let user try again
+      setHasStartedSelection(false)
+    }
     
-    // Restore window only when closing results or if needed
-    // For now keep it full screen to show results? 
-    // Usually we want to restore so user can see other things.
-    // But if we restore, the modal might look weird.
-    // Let's restore for now.
-    // await restoreWindow() 
-  }, [isSelecting, startPos])
+    // Restore window handled in processCapture finally block ONLY on success or critical failure
+  }, [isSelecting, startPos, isProcessing, hasStartedSelection])
 
   const cancelSelection = useCallback(async () => {
+    if (isProcessing) return // Prevent cancel during processing
     setIsSelecting(false)
     setHasStartedSelection(false)
     setScreenshotImage('')
     setIsActive(false) // Deactivate component
     await restoreWindow()
-  }, [])
+  }, [isProcessing])
 
   const captureMonitorImage = useCallback(async (monitor: MonitorInfo) => {
     const base64 = await invoke<string>('capture_screen', {
@@ -312,7 +268,7 @@ export default function ScreenshotTranslation() {
   }
 
   const processCapture = async (x: number, y: number, w: number, h: number) => {
-    window.dispatchEvent(new CustomEvent('debug-log', { detail: `Processing capture: ${x},${y} ${w}x${h}` }));
+    window.dispatchEvent(new CustomEvent('debug-log', { detail: `Processing capture: ${x},${y} ${w}x${h} (CSS Pixels)` }));
 
     try {
       const appWindow = getCurrentWindow();
@@ -321,46 +277,69 @@ export default function ScreenshotTranslation() {
         throw new Error('Monitor info not available');
       }
 
+      // Hide overlay before capturing to avoid capturing our own UI
       await appWindow.hide();
-      for (let i = 0; i < 8; i += 1) {
-        const stillVisible = await appWindow.isVisible();
-        if (!stillVisible) break;
-        await new Promise(r => setTimeout(r, 40));
-      }
+      // Wait a bit for window to disappear completely
+      await new Promise(r => setTimeout(r, 50));
 
-      const source = screenshotImage || (await captureMonitorImage(monitor));
-      if (!source) {
-        throw new Error('Failed to capture screen for OCR');
-      }
+      // Calculate physical coordinates based on monitor position and DPI
+      // monitor.x/y are in physical pixels (from GetMonitorInfoW)
+      // x, y, w, h are in CSS pixels relative to the overlay window (which is positioned at monitor.x, monitor.y)
+      // The overlay window size is set to monitor.w, monitor.h (physical pixels?)
+      // Wait, setSize takes PhysicalSize. So overlay size matches monitor physical size.
+      // But React renders in CSS pixels.
+      // If monitor is high-DPI, 1 CSS pixel = dpr Physical pixels.
+      
+      const dpr = window.devicePixelRatio || 1;
+      
+      // Calculate absolute screen coordinates for capture
+      // The overlay is positioned at monitor.x, monitor.y (Physical)
+      // But the content inside is relative to window client area.
+      // x, y are client coordinates (CSS pixels).
+      
+      // Physical coordinates relative to monitor origin:
+      const physRelX = Math.round(x * dpr);
+      const physRelY = Math.round(y * dpr);
+      const physW = Math.round(w * dpr);
+      const physH = Math.round(h * dpr);
+      
+      // Absolute screen coordinates:
+      const absX = monitor.x + physRelX;
+      const absY = monitor.y + physRelY;
 
-      await appWindow.show();
-      await appWindow.setFocus();
+      window.dispatchEvent(new CustomEvent('debug-log', { detail: `Capturing absolute rect: ${absX},${absY} ${physW}x${physH} (Physical) Lang: ${ocrLanguage}` }));
 
-      const croppedImage = await cropImage(source, x, y, w, h);
-      const processedImage = await preprocessImage(croppedImage, {
-        enhance: ocrEnhance,
-        mode: ocrMode,
-        limitMaxSize: ocrLimitMaxSize,
-        maxDimension: ocrMaxDimension
+      // Call backend to capture and OCR directly
+      // This is the native way: let backend handle the heavy lifting
+      const ocrResult = await invoke<{ text: string, confidence: number }>('capture_and_ocr', {
+        x: absX,
+        y: absY,
+        w: physW,
+        h: physH,
+        language: ocrLanguage // Make sure language is passed correctly. e.g. "zh" or "zh-Hans" or "auto"
       });
-      window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Sending image to OCR...' }));
 
-      const ocrResult = await invoke<{ text: string, confidence: number }>('ocr', {
-        request: { 
-          image_data: processedImage,
-          language: ocrLanguage
-        }
-      });
+      // Show window again if we want to show result locally (not implemented)
+      // But typically we just close overlay after capture
+      // await appWindow.show(); 
 
       window.dispatchEvent(new CustomEvent('debug-log', { detail: `OCR Result: ${ocrResult.text.substring(0, 30)}...` }));
 
       if (ocrResult.text && ocrResult.text.trim()) {
         const info = { confidence: ocrResult.confidence, language: getOcrLanguageLabel(ocrLanguage) }
+        const payload = { text: ocrResult.text, ocrInfo: info, autoShow: ocrShowResult }
         window.dispatchEvent(new CustomEvent('debug-log', { detail: `OCR Success: ${ocrResult.text.substring(0, 30)}...` }));
-        if (ocrShowResult) {
-          window.dispatchEvent(new CustomEvent('request-translation', { detail: { text: ocrResult.text, ocrInfo: info } }));
-        } else {
-          window.dispatchEvent(new CustomEvent('debug-log', { detail: 'OCR result suppressed (show result disabled).' }));
+        
+        // Dispatch to main window via backend
+        try {
+            await invoke('emit_to_main', { event: 'request-translation', payload: JSON.stringify(payload) });
+        } catch (err) {
+            console.error('Failed to emit to main window', err);
+            window.dispatchEvent(new CustomEvent('debug-log', { detail: `Failed to emit to main: ${String(err)}` }));
+        }
+
+        if (!ocrShowResult) {
+          window.dispatchEvent(new CustomEvent('debug-log', { detail: 'OCR result processed silently (show result disabled).' }));
         }
       } else {
         showErrorNotification('No text detected in the selected area.')
@@ -384,62 +363,63 @@ export default function ScreenshotTranslation() {
       window.dispatchEvent(new CustomEvent('debug-log', { detail: `Error: ${errorStr} -> User message: ${userFriendlyMsg}` }));
       showErrorNotification(userFriendlyMsg)
     } finally {
-      await restoreWindow(ocrShowResult)
+      setIsProcessing(false) // Ensure processing state is cleared
+      await restoreWindow()
     }
   }
 
   const setupWindowForCapture = async (width: number, height: number) => {
-    const appWindow = getCurrentWindow()
-    await safeWindowCall('setAlwaysOnTop(true)', () => appWindow.setAlwaysOnTop(true))
-    await safeWindowCall('setDecorations(false)', () => appWindow.setDecorations(false))
-    await safeWindowCall('setResizable(true)', () => appWindow.setResizable(true))
-    await safeWindowCall('setSize', () => appWindow.setSize(new PhysicalSize(width, height)))
-    await safeWindowCall('setFocus', () => appWindow.setFocus())
+    window.dispatchEvent(new CustomEvent('debug-log', { detail: `Setting up window: ${width}x${height}` }));
+    
+    // Set window size first to match monitor
+    // Note: setSize takes physical pixels if using PhysicalSize
+    const appWindow = getCurrentWindow();
+    await safeWindowCall('setSize', () => appWindow.setSize(new PhysicalSize(width, height)));
+    
+    // Ensure window is frameless and transparent
+    await safeWindowCall('setDecorations', () => appWindow.setDecorations(false));
+    
+    // Important: On Windows, sometimes transparency fails if not explicitly set
+    // But tauri.conf.json handles the initial state.
+    
+    // Always on top
+    await safeWindowCall('setAlwaysOnTop', () => appWindow.setAlwaysOnTop(true));
+    
+    // Make sure we are not maximized (which might break transparency on some systems)
+    await safeWindowCall('unmaximize', () => appWindow.unmaximize());
+    
+    // Set shadow false (shadow can sometimes cause white border artifacts)
+    await safeWindowCall('setShadow', () => appWindow.setShadow(false));
   }
 
-  const restoreWindow = useCallback(async (showWindow = true) => {
+  const restoreWindow = useCallback(async () => {
     const appWindow = getCurrentWindow()
-    await safeWindowCall('setAlwaysOnTop(false)', () => appWindow.setAlwaysOnTop(false))
-    await safeWindowCall('setResizable(true)', () => appWindow.setResizable(true))
-    await safeWindowCall('setDecorations(true)', () => appWindow.setDecorations(true))
-    if (showWindow) {
-      await safeWindowCall('show', () => appWindow.show())
-    }
+    // Just hide the overlay window
+    await safeWindowCall('hide', () => appWindow.hide())
 
-    const pre = preCaptureStateRef.current
-    try {
-      if (pre?.maximized) {
-        await safeWindowCall('maximize', () => appWindow.maximize())
-      } else if (pre?.position && pre?.size) {
-        await safeWindowCall('setPosition', () => appWindow.setPosition(new PhysicalPosition(pre.position.x, pre.position.y)))
-        await safeWindowCall('setSize', () => appWindow.setSize(new PhysicalSize(pre.size.width, pre.size.height)))
-      }
-    } catch (error) {
-      console.error('Failed to restore window position:', error)
-    } finally {
-      preCaptureStateRef.current = null
-      window.dispatchEvent(new CustomEvent('ocr-capture-active', { detail: false }))
-    }
+    window.dispatchEvent(new CustomEvent('ocr-capture-active', { detail: false }))
     
     // Clear hotkey processing flag when done
     try {
       await invoke('clear_hotkey_processing');
-      window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Cleared hotkey processing flag' }));
     } catch (error) {
       console.error('Failed to clear hotkey processing:', error);
     }
     
     // Deactivate component when restoring window
     setIsActive(false);
+    setIsSelecting(false); // Reset selection state
     setHasStartedSelection(false);
+    setIsProcessing(false);
     setScreenshotImage('');
   }, [])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
-    if (e.key === 'Escape' && isSelecting) {
+    if (e.key === 'Escape') {
+      if (isProcessing) return // Don't allow cancel during processing via Esc
       cancelSelection()
     }
-  }, [cancelSelection, isSelecting])
+  }, [cancelSelection, isProcessing])
 
   useEffect(() => {
     if (isSelecting) {
@@ -458,6 +438,30 @@ export default function ScreenshotTranslation() {
   useEffect(() => {
     window.dispatchEvent(new CustomEvent('debug-log', { detail: 'ScreenshotTranslation component mounted, setting up event listener' }));
     
+    // Listen for Tauri events
+    const listeners: Promise<() => void>[] = [];
+
+    console.log('Registering overlay event listeners');
+    // Also dispatch to main window for visibility
+    const logToMain = (msg: string) => {
+        console.log(msg);
+        // We can't easily dispatch to main window from here without backend help or broadcast
+        // But we can try to use local storage or just rely on console
+    };
+
+    listeners.push(listen('trigger-screenshot-v2', () => {
+       logToMain('Overlay received trigger-screenshot-v2');
+       window.dispatchEvent(new CustomEvent('trigger-screenshot-ocr'));
+    }));
+
+    listeners.push(listen('trigger-silent-ocr-v2', () => {
+       logToMain('Overlay received trigger-silent-ocr-v2');
+       window.dispatchEvent(new CustomEvent('trigger-silent-ocr'));
+    }));
+
+    // Add a mount check
+    invoke('ocr_ready_check').catch(() => {}); // Optional: tell backend we are ready
+
     const handleTrigger = async () => {
       window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Screenshot OCR event received' }));
       
@@ -471,14 +475,6 @@ export default function ScreenshotTranslation() {
         const appWindow = getCurrentWindow();
 
         window.dispatchEvent(new CustomEvent('ocr-capture-active', { detail: true }))
-        try {
-          const pos = await appWindow.outerPosition();
-          const size = await appWindow.innerSize();
-          const maximized = await appWindow.isMaximized();
-          preCaptureStateRef.current = { position: { x: pos.x, y: pos.y }, size: { width: size.width, height: size.height }, maximized };
-        } catch (error) {
-          console.error('Failed to capture pre-ocr window state:', error)
-        }
         
         // Activate the component
         setIsActive(true);
@@ -489,28 +485,38 @@ export default function ScreenshotTranslation() {
         
         window.dispatchEvent(new CustomEvent('debug-log', { detail: `Monitor: ${monitor.x},${monitor.y} ${monitor.w}x${monitor.h} (${monitor.name})` }));
         
-        await safeWindowCall('hide', () => appWindow.hide())
-
+        // Setup window properties (fullscreen, etc)
+        // For native overlay, we just need to ensure we cover the monitor
+        await setupWindowForCapture(monitor.w, monitor.h);
+        
         // Move window to the correct monitor
         await safeWindowCall('setPosition', () => appWindow.setPosition(new PhysicalPosition(monitor.x, monitor.y)));
 
-        // Setup window properties (fullscreen, etc)
-        await setupWindowForCapture(monitor.w, monitor.h);
-        await captureMonitorImage(monitor);
-        await new Promise(r => setTimeout(r, 30));
-        
-        // Activate overlay after window is in place
+        // Show window immediately for responsiveness (with transparent background)
+        // This gives immediate feedback (cursor change) while we capture screen
         setIsSelecting(true);
         setHasStartedSelection(false);
-        
-        // Finally show the window
         await safeWindowCall('show', () => appWindow.show());
         await safeWindowCall('setFocus', () => appWindow.setFocus());
+
+        // Capture screen asynchronously
+        window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Capturing screen...' }));
+        
+        // Add a small delay to ensure window is fully rendered/positioned before capturing?
+        // Actually, we want to capture BEFORE the overlay obscures the screen if it wasn't transparent.
+        // But our overlay is transparent initially (no image).
+        // However, we need to be careful not to capture our own UI elements if they appear.
+        // Since screenshotImage is empty, overlay is just transparent div.
+        
+        // Note: capture_screen might capture the overlay window itself if it's visible?
+        // On Windows, GDI capture usually captures everything.
+        // But our window is transparent (alpha), so it might not block the content behind it.
+        // Let's try capturing after show. If it captures the crosshair cursor, that's fine.
+        
+        const base64 = await captureMonitorImage(monitor);
+        window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Screen captured, updating background' }));
         
         window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Window setup complete, ready for selection' }));
-        // Don't set default positions - wait for user to click
-        // setStartPos({ x: 0, y: 0 })
-        // setCurrentPos({ x: 0, y: 0 })
       } catch (error) {
         console.error('Failed to setup window:', error)
         window.dispatchEvent(new CustomEvent('debug-log', { detail: `Setup failed: ${String(error)}` }));
@@ -527,6 +533,7 @@ export default function ScreenshotTranslation() {
     window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Event listener for trigger-screenshot-ocr registered' }));
     
     return () => {
+      listeners.forEach(p => p.then(f => f()));
       window.removeEventListener('trigger-screenshot-ocr', handleTrigger)
       window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Event listener for trigger-screenshot-ocr removed' }));
     }
@@ -534,8 +541,8 @@ export default function ScreenshotTranslation() {
 
 
   // Always render but hide when not active - event listener needs to be active
-  if (!isSelecting) {
-    return <div style={{ display: 'none' }} /> // Hidden but mounted, event listener active
+  if (!isActive) { // Changed from !isSelecting to keep component mounted but hidden
+    return null; 
   }
 
   const selectionStyle = (isSelecting && hasStartedSelection && (Math.abs(currentPos.x - startPos.x) > 5 || Math.abs(currentPos.y - startPos.y) > 5)) ? {
@@ -552,58 +559,85 @@ export default function ScreenshotTranslation() {
     return { width: Math.round(width), height: Math.round(height) };
   }
 
-  const overlayStyle = screenshotImage
-    ? {
-        backgroundImage: `url("data:image/png;base64,${screenshotImage}")`,
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        filter: 'brightness(0.8) contrast(1.1)'
-      }
-    : undefined
+  // Magnifier removed - not compatible with backend-only capture (no image data to magnify)
+
+  const overlayStyle = {
+    backgroundColor: 'transparent', // Make sure it's transparent
+    // No background image anymore
+  }
 
   return (
     <div
-      className="fixed inset-0 z-50 cursor-crosshair"
-      onMouseDown={startSelection}
+      className={`fixed inset-0 z-50 ${isProcessing ? 'cursor-wait' : 'cursor-crosshair'}`}
+      onMouseDown={!isProcessing ? startSelection : undefined}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        if (!isProcessing) cancelSelection();
+      }}
       style={{
         ...overlayStyle,
-        backgroundColor: 'rgba(0,0,0,0.2)',
-        backgroundBlendMode: 'overlay'
+        // We still need a very slight background to capture mouse events?
+        // Actually, transparent div captures events fine.
+        // But maybe we want a slight dimming effect?
+        // If we don't have the screenshot image, we can't do the "dim everything except selection" effect easily
+        // without complex CSS masks or SVGs.
+        // For now, let's use a very transparent background so user can see through.
+        backgroundColor: 'rgba(0,0,0,0.01)', // Almost invisible but captures events
       }}
     >
-      {selectionStyle && (
+      {/* Selection Box */}
+      {selectionStyle && !isProcessing && (
         <div
-          className="absolute border-2 border-[var(--ui-accent)] bg-[var(--ui-accent)]/20 shadow-lg"
+          className="absolute border-2 border-[var(--ui-accent)] bg-[var(--ui-accent)]/10 shadow-lg pointer-events-none"
           style={{
             ...selectionStyle,
-            boxShadow: '0 0 0 1px rgba(212, 175, 55, 0.3), 0 0 20px rgba(212, 175, 55, 0.45)'
+            boxShadow: '0 0 0 1px rgba(255, 255, 255, 0.3), 0 0 20px rgba(0, 0, 0, 0.5)'
           }}
         >
-          <div className="absolute -top-8 left-0 bg-[var(--ui-text)] text-[var(--ui-accent)] px-2 py-1 rounded text-xs font-medium shadow-lg">
-            {getSelectionInfo()?.width} x {getSelectionInfo()?.height}
+          <div className="absolute -top-8 left-0 bg-neutral-900/90 text-white px-2 py-1 rounded text-xs font-mono shadow-lg border border-white/10 backdrop-blur-sm">
+            {getSelectionInfo()?.width} × {getSelectionInfo()?.height}
           </div>
-          <div className="absolute -top-1 -left-1 w-3 h-3 bg-[var(--ui-accent)] rounded-full border-2 border-white shadow-sm" />
-          <div className="absolute -top-1 -right-1 w-3 h-3 bg-[var(--ui-accent)] rounded-full border-2 border-white shadow-sm" />
-          <div className="absolute -bottom-1 -left-1 w-3 h-3 bg-[var(--ui-accent)] rounded-full border-2 border-white shadow-sm" />
-          <div className="absolute -bottom-1 -right-1 w-3 h-3 bg-[var(--ui-accent)] rounded-full border-2 border-white shadow-sm" />
+          {/* Corner Handles */}
+          <div className="absolute -top-1 -left-1 w-2 h-2 bg-white rounded-full shadow-sm" />
+          <div className="absolute -top-1 -right-1 w-2 h-2 bg-white rounded-full shadow-sm" />
+          <div className="absolute -bottom-1 -left-1 w-2 h-2 bg-white rounded-full shadow-sm" />
+          <div className="absolute -bottom-1 -right-1 w-2 h-2 bg-white rounded-full shadow-sm" />
         </div>
       )}
-      <div className="fixed top-6 left-1/2 -translate-x-1/2 bg-gradient-to-r from-neutral-900 to-neutral-800 text-white px-6 py-3 rounded-2xl shadow-2xl pointer-events-none select-none border border-neutral-700/70 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <div className="w-2 h-2 bg-[var(--ui-accent)] rounded-full animate-pulse" />
-          <div>
-            <p className="text-sm font-medium tracking-wide">Drag to select the area to translate.</p>
-            <p className="text-xs text-white/60 mt-1">Press ESC to cancel or release the mouse to finish.</p>
+
+      {/* Processing Indicator */}
+      {isProcessing && (
+        <div className="fixed inset-0 flex items-center justify-center z-[70] pointer-events-none">
+          <div className="bg-neutral-900/80 backdrop-blur-md text-white px-8 py-6 rounded-2xl shadow-2xl flex flex-col items-center gap-4 border border-white/10">
+            <div className="relative w-12 h-12">
+              <div className="absolute inset-0 border-4 border-white/20 rounded-full"></div>
+              <div className="absolute inset-0 border-4 border-[var(--ui-accent)] rounded-full border-t-transparent animate-spin"></div>
+            </div>
+            <div className="text-center">
+              <p className="text-lg font-medium">Processing Text...</p>
+              <p className="text-sm text-white/60 mt-1">Analyzing image and translating</p>
+            </div>
           </div>
         </div>
-        {getSelectionInfo() && (
-          <div className="mt-2 pt-2 border-t border-white/10">
-            <p className="text-xs text-[var(--ui-accent)]">
-              Selection: {getSelectionInfo()?.width} x {getSelectionInfo()?.height} px
-            </p>
+      )}
+
+      {/* Toolbar / Instructions */}
+      {!isProcessing && (
+        <div className="fixed top-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 pointer-events-none select-none z-[60]">
+          <div className="bg-neutral-900/80 backdrop-blur-md text-white px-6 py-3 rounded-full shadow-2xl border border-white/10 flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 bg-[var(--ui-accent)] rounded-full animate-pulse" />
+              <span className="font-medium text-sm">Select Area</span>
+            </div>
+            <div className="h-4 w-px bg-white/20" />
+            <div className="flex items-center gap-3 text-xs text-white/70">
+              <span className="flex items-center gap-1"><kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">LMB</kbd> Drag</span>
+              <span className="flex items-center gap-1"><kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">RMB</kbd> Cancel</span>
+              <span className="flex items-center gap-1"><kbd className="bg-white/10 px-1.5 py-0.5 rounded font-mono">ESC</kbd> Close</span>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

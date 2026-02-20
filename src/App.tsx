@@ -5,7 +5,7 @@ import Sidebar from './components/Sidebar'
 import Settings from './components/Settings'
 import InputTranslation from './components/InputTranslation'
 import SelectTranslation from './components/SelectTranslation'
-import ScreenshotTranslation from './components/ScreenshotTranslation'
+// ScreenshotTranslation moved to separate window, import removed
 import History from './components/History'
 import Favorites from './components/Favorites'
 
@@ -177,50 +177,77 @@ function App() {
     }));
 
     // Handle internal translation requests (from OCR or in-app selection)
+    // This is for DOM events
     const handleRequestTranslation = (event: Event) => {
       const customEvent = event as CustomEvent;
       const payload = customEvent.detail;
       const text = typeof payload === 'string' ? payload : payload?.text;
       const incomingOcr = typeof payload === 'string' ? null : payload?.ocrInfo;
+      const autoShow = typeof payload === 'string' ? true : payload?.autoShow ?? true;
       if (text) {
-        addDebugLog(`Received request-translation: "${text.substring(0, 50)}..."`);
-        setActiveTab('translate');
+        addDebugLog(`Received request-translation (DOM): "${text.substring(0, 50)}..."`);
         setTranslationText(text);
         setOcrMeta(incomingOcr || null);
         
         // Dispatch to ensure InputTranslation updates
         setTimeout(() => {
-            window.dispatchEvent(new CustomEvent('trigger-select-translation', { detail: text }));
+          window.dispatchEvent(new CustomEvent('trigger-select-translation', { detail: text }));
         }, 100);
-        
-        // Focus window
-        import('@tauri-apps/api/window').then(m => {
-            m.getCurrentWindow().setFocus();
-        });
+
+        if (autoShow) {
+          setActiveTab('translate');
+          // Focus window
+          import('@tauri-apps/api/window').then(m => {
+            const appWindow = m.getCurrentWindow();
+            // Need to unminimize if minimized
+            appWindow.unminimize();
+            appWindow.show();
+            appWindow.setFocus();
+            // Force focus to front if needed
+            appWindow.setAlwaysOnTop(true);
+            setTimeout(() => appWindow.setAlwaysOnTop(false), 500);
+          });
+        }
       }
     };
     window.addEventListener('request-translation', handleRequestTranslation);
 
+    // Listen for 'request-translation' from Tauri event (sent by Overlay window via backend)
+    listeners.push(listen('request-translation', (event) => {
+      try {
+        const rawPayload = event.payload as string;
+        // The payload from backend is a JSON string
+        const payload = JSON.parse(rawPayload);
+        
+        console.log('Received request-translation from Tauri event:', payload);
+        addDebugLog(`Received request-translation (Tauri): "${payload.text?.substring(0, 50)}..."`);
+
+        // Forward to our internal handler by dispatching a DOM event
+        window.dispatchEvent(new CustomEvent('request-translation', { detail: payload }));
+      } catch (e) {
+        console.error('Failed to parse request-translation payload:', e);
+        addDebugLog(`Error parsing request-translation: ${e}`);
+      }
+    }));
+
     // Screenshot OCR event
+    // Note: This is now primarily handled by the overlay window, but we keep this listener
+    // in case the overlay fails or for fallback behavior if needed.
+    // However, if overlay handles it, we don't want double handling.
+    // Let's modify it to only log or handle if specifically targeted at main.
     listeners.push(listen('trigger-screenshot', () => {
-      addDebugLog('Received trigger-screenshot event');
-      console.log('Screenshot OCR event received');
+      addDebugLog('Received trigger-screenshot event (Main Window)');
+      console.log('Screenshot OCR event received in Main Window');
       
-      // Show screenshot translation overlay
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('trigger-screenshot-ocr'));
-      }, 100);
+      // If we are in the main window, we generally DON'T want to trigger the old flow
+      // unless we are in a fallback mode. 
+      // For now, let's just log it. The overlay window should handle the actual capture.
     }));
 
     // Silent OCR event
     listeners.push(listen('trigger-silent-ocr', () => {
-      addDebugLog('Received trigger-silent-ocr event');
-      console.log('Silent OCR event received');
-      
-      // Show screenshot translation overlay
-      setTimeout(() => {
-        window.dispatchEvent(new CustomEvent('trigger-silent-ocr'));
-      }, 100);
+      addDebugLog('Received trigger-silent-ocr event (Main Window)');
+      console.log('Silent OCR event received in Main Window');
     }));
 
     // Focus input event
@@ -331,7 +358,7 @@ function App() {
 
         {/* Global Overlays */}
         <SelectTranslation />
-        <ScreenshotTranslation />
+        {/* ScreenshotTranslation moved to separate window */}
 
         {/* Debug Info Overlay */}
         {!debugOpen ? (

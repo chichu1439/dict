@@ -57,14 +57,20 @@ pub fn register_hotkeys(app: AppHandle, hotkeys: Vec<HotkeyAction>) -> Result<()
     let state = app.state::<HotkeyState>();
     let global_shortcut = app.global_shortcut();
     
+    // Check if mappings are already populated. If so, this might be a redundant call from a re-render.
+    // However, if the hotkeys changed, we should re-register.
+    // A simple heuristic: if we have mappings and the new hotkeys are the same count, maybe skip?
+    // Better yet, just unregister all and proceed.
+    
     // Try to unregister any existing shortcuts first
     println!("Attempting to unregister any existing shortcuts...");
     match global_shortcut.unregister_all() {
         Ok(_) => println!("Successfully unregistered existing shortcuts"),
         Err(e) => println!("No existing shortcuts to unregister or failed: {}", e),
     }
-    // Small delay to ensure cleanup
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    
+    // Wait a bit longer to ensure OS releases the hooks
+    std::thread::sleep(std::time::Duration::from_millis(100));
 
     let mut mapping = state.mapping.lock().unwrap();
     mapping.clear();
@@ -77,30 +83,58 @@ pub fn register_hotkeys(app: AppHandle, hotkeys: Vec<HotkeyAction>) -> Result<()
         let shortcut_str = hotkey.shortcut.clone();
         let action_name = hotkey.name.clone();
         
-        // Register the shortcut
-        match global_shortcut.register(shortcut_str.as_str()) {
-            Ok(_) => {
-                if let Ok(shortcut_obj) = Shortcut::from_str(&shortcut_str) {
-                    let normalized_str = shortcut_obj.to_string();
-                    println!("Registered hotkey: {} -> {} (Action: {})", shortcut_str, normalized_str, action_name);
-                    
-                    // 注册多种格式以确保匹配
-                    let formats = generate_shortcut_formats(&normalized_str);
-                    for format in formats {
-                        mapping.insert(format, action_name.clone());
+        // Skip if already registered (though unregister_all should have handled it)
+        // Note: is_registered requires &str, but we need to check if the plugin supports it or if we need to convert
+        // The error says ShortcutWrapper doesn't implement From<&String>.
+        // Let's rely on register() returning an error if it's already registered, which we handle below.
+        // So we can skip the explicit is_registered check or fix it by parsing the shortcut first.
+        
+        // Option 1: Try to register directly and handle "already registered" error.
+        // Option 2: Parse string to Shortcut first.
+        
+        // Let's go with Option 1 since we already implemented the error handling logic.
+        // We'll comment out the is_registered check for now as it's causing compilation issues.
+        
+        /*
+        if global_shortcut.is_registered(&shortcut_str) {
+             println!("Warning: Shortcut {} appears to still be registered, skipping re-registration", shortcut_str);
+             // We still add it to mapping because the event might still fire
+        } else {
+        */
+            // Register the shortcut
+            match global_shortcut.register(shortcut_str.as_str()) {
+                Ok(_) => {
+                    println!("Successfully registered hotkey: {}", shortcut_str);
+                },
+                Err(e) => {
+                    // Check if error is "HotKey already registered"
+                    let err_str = e.to_string();
+                    if err_str.contains("already registered") {
+                        println!("Note: Hotkey {} was already registered (race condition?), proceeding anyway", shortcut_str);
+                    } else {
+                        println!("Failed to register shortcut {}: {}", shortcut_str, e);
+                        // Don't fail the whole batch, just skip this one
+                        continue;
                     }
                 }
-            },
-            Err(e) => {
-                println!("Failed to register shortcut {}: {}", shortcut_str, e);
-                return Err(format!("Failed to register {}: {}", shortcut_str, e));
+            }
+        // }
+
+        if let Ok(shortcut_obj) = Shortcut::from_str(&shortcut_str) {
+            let normalized_str = shortcut_obj.to_string();
+            println!("Mapping hotkey: {} -> {} (Action: {})", shortcut_str, normalized_str, action_name);
+            
+            // Register multiple formats
+            let formats = generate_shortcut_formats(&normalized_str);
+            for format in formats {
+                mapping.insert(format, action_name.clone());
             }
         }
     }
     
-    // 打印当前映射用于调试
+    // Print current mappings
     println!("Current hotkey mappings:");
-    for (key, value) in mapping.iter() {
+    for (key, value) in mapping.iter().take(5) {
         println!("  {} -> {}", key, value);
     }
     
@@ -248,15 +282,40 @@ fn handle_input_translation<R: Runtime>(app: &AppHandle<R>) {
 }
 
 fn handle_screenshot_ocr<R: Runtime>(app: &AppHandle<R>, silent: bool) {
-    println!("Handling screenshot OCR, silent: {}", silent);
-    if let Some(window) = app.get_webview_window("main") {
-        let event_name = if silent { "trigger-silent-ocr" } else { "trigger-screenshot" };
-        let _ = window.emit(event_name, ());
-        println!("Emitted {} event", event_name);
+    println!("Handling screenshot OCR (V2), silent: {}", silent);
+    
+    // Debug: List all windows
+    let windows = app.webview_windows();
+    println!("Available windows: {:?}", windows.keys());
+
+    // Instead of emitting to main window, we show the overlay window
+    if let Some(overlay) = app.get_webview_window("overlay") {
+        let event_name = if silent { "trigger-silent-ocr-v2" } else { "trigger-screenshot-v2" };
+        
+        println!("Found overlay window, emitting event: {}", event_name);
+        
+        // Show the window first to ensure it's active?
+        // let _ = overlay.show();
+        // let _ = overlay.set_focus();
+        
+        let _ = overlay.emit(event_name, ());
+        
+        // Also log to main window for debugging
+        if let Some(main) = app.get_webview_window("main") {
+             let _ = main.emit("debug-log", format!("Backend emitted {} to overlay (Targeted)", event_name));
+        }
+    } else {
+        println!("Overlay window NOT found!");
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.emit("debug-log", "CRITICAL ERROR: Overlay window missing in backend!".to_string());
+        }
     }
-    // DON'T clear processing flag here - let the frontend handle it
-    // The frontend will clear the flag when the screenshot process is complete
-    println!("Screenshot OCR event emitted, processing flag retained");
+    
+    // Clear processing flag immediately
+    if let Some(state) = app.try_state::<HotkeyState>() {
+        *state.is_processing.lock().unwrap() = false;
+        println!("Hotkey processing flag cleared immediately");
+    }
 }
 
 async fn perform_selection_translation<R: Runtime>(app: AppHandle<R>) {

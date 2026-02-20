@@ -22,6 +22,21 @@
         "center": true,
         "decorations": true,
         "skipTaskbar": false
+      },
+      {
+        "label": "overlay",
+        "title": "Screenshot Overlay",
+        "width": 800,
+        "height": 600,
+        "resizable": false,
+        "center": true,
+        "decorations": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "alwaysOnTop": true,
+        "transparent": true,
+        "shadow": false,
+        "url": "overlay.html"
       }
     ],
     "security": {

@@ -86,6 +86,47 @@ async fn get_mouse_monitor() -> Result<MonitorInfo, String> {
     Err("Not supported on this platform".to_string())
 }
 
+use tauri::Emitter;
+use tauri::Manager;
+
+#[tauri::command]
+async fn emit_to_main<R: tauri::Runtime>(app: tauri::AppHandle<R>, event: String, payload: String) -> Result<(), String> {
+    if let Some(main) = app.get_webview_window("main") {
+        // Force window to foreground
+        // Unminimize first
+        if let Ok(is_minimized) = main.is_minimized() {
+            if is_minimized {
+                let _ = main.unminimize();
+            }
+        }
+        
+        // Show window
+        let _ = main.show();
+        
+        // Focus window
+        let _ = main.set_focus();
+        
+        // Force activate on Windows
+        #[cfg(target_os = "windows")]
+        {
+            // Optional: Use Win32 API to force foreground if set_focus fails
+            // But usually set_focus works if called from backend user interaction chain
+        }
+
+        // We need to parse the payload back to JSON or send as string?
+        // Let's send as string and let frontend parse it, or use emit directly if we can
+        // But emit takes Serialize. String is Serialize.
+        main.emit(&event, payload).map_err(|e| e.to_string())
+    } else {
+        Err("Main window not found".to_string())
+    }
+}
+
+#[tauri::command]
+fn ocr_ready_check() -> Result<(), String> {
+    Ok(())
+}
+
 fn main() {
     tauri::Builder::default()
         .manage(hotkey::HotkeyState::new())
@@ -95,7 +136,21 @@ fn main() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().with_handler(|app, shortcut, _event| {
             hotkey::handle_shortcut(app, shortcut);
         }).build())
-        .invoke_handler(tauri::generate_handler![translate, translate_stream, ocr, capture_and_ocr, capture_screen, speak, hotkey::get_hotkeys, hotkey::set_hotkey, hotkey::register_hotkeys, hotkey::clear_hotkey_processing, get_mouse_monitor])
+        .invoke_handler(tauri::generate_handler![
+            translate, 
+            translate_stream, 
+            ocr, 
+            capture_and_ocr, 
+            capture_screen, 
+            speak, 
+            hotkey::get_hotkeys, 
+            hotkey::set_hotkey, 
+            hotkey::register_hotkeys, 
+            hotkey::clear_hotkey_processing, 
+            get_mouse_monitor,
+            emit_to_main,
+            ocr_ready_check
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
