@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+﻿import { useState, useCallback, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow, PhysicalPosition, PhysicalSize } from '@tauri-apps/api/window'
@@ -17,14 +17,12 @@ export default function ScreenshotTranslation() {
   const [isSelecting, setIsSelecting] = useState(false)
   const [hasStartedSelection, setHasStartedSelection] = useState(false) // Track if user has actually started dragging
   const [isProcessing, setIsProcessing] = useState(false) // New: Track processing state
-  const [screenshotImage, setScreenshotImage] = useState('')
-  // We removed local image storage, we will rely on backend to capture
   const [startPos, setStartPos] = useState({ x: 0, y: 0 })
   const [currentPos, setCurrentPos] = useState({ x: 0, y: 0 })
   // Removed preCaptureStateRef as it's no longer needed for overlay window
   const monitorRef = useRef<MonitorInfo | null>(null)
 
-  const { ocrLanguage, ocrMode, ocrEnhance, ocrLimitMaxSize, ocrMaxDimension, ocrShowResult } = useSettingsStore()
+  const { ocrLanguage, ocrShowResult } = useSettingsStore()
 
   const safeWindowCall = useCallback(async (label: string, action: () => Promise<void>) => {
     try {
@@ -72,114 +70,10 @@ export default function ScreenshotTranslation() {
     setCurrentPos({ x: e.clientX, y: e.clientY })
   }, [isSelecting])
 
-  const cropImage = async (base64: string, x: number, y: number, w: number, h: number): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const dpr = window.devicePixelRatio || 1;
-        
-        // Ensure valid dimensions
-        const safeW = Math.max(1, w * dpr);
-        const safeH = Math.max(1, h * dpr);
-        
-        canvas.width = safeW;
-        canvas.height = safeH;
-        
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return reject('No context');
-        
-        // Draw the slice of the original image onto the canvas
-        // The original image is full screen size (screen.width * dpr)
-        // x, y, w, h are in CSS pixels, so we scale them by dpr to find source coordinates
-        ctx.drawImage(img, x * dpr, y * dpr, safeW, safeH, 0, 0, safeW, safeH);
-        
-        // Removed filter - let the preprocess stage handle any necessary enhancements
-        // This ensures cropImage just returns the raw cropped data
-        // ctx.filter = 'contrast(1.2) brightness(1.05) grayscale(1)';
-        // ctx.drawImage(canvas, 0, 0);
-        // ctx.filter = 'none';
-
-        const data = canvas.toDataURL('image/png');
-        resolve(data.split(',')[1]);
-      };
-      img.onerror = reject;
-      img.src = `data:image/bmp;base64,${base64}`;
-    });
-  }
-
-  const preprocessImage = async (base64Png: string, options: { enhance: boolean; mode: 'accuracy' | 'speed'; limitMaxSize: boolean; maxDimension: number }): Promise<string> => {
-    // If enhancement is disabled and no resizing needed, return original immediately
-    if (!options.enhance && !options.limitMaxSize) {
-       return base64Png;
-    }
-
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => {
-        const maxDim = Math.max(img.width, img.height);
-        let scaleFactor = 1;
-
-        // Only scale down if significantly larger than needed
-        if (options.limitMaxSize && options.maxDimension > 0 && maxDim > options.maxDimension) {
-          scaleFactor = options.maxDimension / maxDim;
-        } 
-        // Restore upscaling for small images to improve OCR accuracy
-        // Tesseract prefers ~300 DPI, screen is usually 96 DPI. So 2x-3x scaling helps small text.
-        else if (options.mode === 'accuracy' && maxDim < 1000) {
-           // Scale up small images, but cap at reasonable size
-           scaleFactor = Math.min(2.5, 2000 / maxDim);
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.max(1, Math.round(img.width * scaleFactor));
-        canvas.height = Math.max(1, Math.round(img.height * scaleFactor));
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return reject('No context');
-
-        // Use high quality scaling
-        ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        
-        // Draw image
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-        if (options.enhance) {
-          // Apply gentle enhancement
-          // For screen text, we want to increase contrast but avoid aggressive binarization that merges strokes
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const data = imageData.data;
-
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            
-            // Grayscale
-            let v = 0.299 * r + 0.587 * g + 0.114 * b;
-            
-            // Gentle Contrast stretching
-            // Less aggressive than before to preserve anti-aliasing details
-            v = (v - 128) * 1.5 + 128; 
-            
-            // Clamp
-            v = Math.max(0, Math.min(255, v));
-
-            data[i] = v;
-            data[i + 1] = v;
-            data[i + 2] = v;
-          }
-          ctx.putImageData(imageData, 0, 0);
-        }
-
-        const out = canvas.toDataURL('image/png');
-        resolve(out.split(',')[1]);
-      };
-      img.onerror = reject;
-      img.src = `data:image/png;base64,${base64Png}`;
-    });
-  }
+/*
+  const cropImage = ... (removed)
+  const preprocessImage = ... (removed)
+*/
 
   const endSelection = useCallback(async (e: React.MouseEvent) => {
     // Must check hasStartedSelection to avoid accidental triggers
@@ -233,28 +127,16 @@ export default function ScreenshotTranslation() {
       setHasStartedSelection(false)
     }
     
-    // Restore window handled in processCapture finally block ONLY on success or critical failure
+    // Restore window handled in processCapture finally block on success or critical failure
   }, [isSelecting, startPos, isProcessing, hasStartedSelection])
 
   const cancelSelection = useCallback(async () => {
     if (isProcessing) return // Prevent cancel during processing
     setIsSelecting(false)
     setHasStartedSelection(false)
-    setScreenshotImage('')
     setIsActive(false) // Deactivate component
     await restoreWindow()
   }, [isProcessing])
-
-  const captureMonitorImage = useCallback(async (monitor: MonitorInfo) => {
-    const base64 = await invoke<string>('capture_screen', {
-      x: Math.round(monitor.x),
-      y: Math.round(monitor.y),
-      w: Math.round(monitor.w),
-      h: Math.round(monitor.h)
-    })
-    setScreenshotImage(base64)
-    return base64
-  }, [])
 
   const showErrorNotification = (message: string) => {
     const event = new CustomEvent('show-notification', {
@@ -411,7 +293,7 @@ export default function ScreenshotTranslation() {
     setIsSelecting(false); // Reset selection state
     setHasStartedSelection(false);
     setIsProcessing(false);
-    setScreenshotImage('');
+    // setScreenshotImage(''); // Removed
   }, [])
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
@@ -513,7 +395,6 @@ export default function ScreenshotTranslation() {
         // But our window is transparent (alpha), so it might not block the content behind it.
         // Let's try capturing after show. If it captures the crosshair cursor, that's fine.
         
-        const base64 = await captureMonitorImage(monitor);
         window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Screen captured, updating background' }));
         
         window.dispatchEvent(new CustomEvent('debug-log', { detail: 'Window setup complete, ready for selection' }));
@@ -641,6 +522,5 @@ export default function ScreenshotTranslation() {
     </div>
   )
 }
-
 
 
