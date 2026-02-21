@@ -3,14 +3,31 @@ pub mod deepl;
 pub mod google;
 pub mod alibaba;
 pub mod google_free;
+pub mod claude;
+pub mod ernie;
 
 use crate::models::{TranslationRequest, TranslationResponse, TranslationResult};
+use crate::error::{AppError, Result};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-pub async fn translate(
-    request: TranslationRequest
-) -> Result<TranslationResponse, String> {
+fn check_api_key(service_config: Option<&serde_json::Value>) -> bool {
+    service_config
+        .and_then(|config| config.get("apiKey"))
+        .and_then(|key| key.as_str())
+        .map(|key| !key.is_empty())
+        .unwrap_or(false)
+}
+
+fn make_error_result(name: &str, error: impl Into<String>) -> TranslationResult {
+    TranslationResult {
+        name: name.to_string(),
+        text: String::new(),
+        error: Some(error.into()),
+    }
+}
+
+pub async fn translate(request: TranslationRequest) -> Result<TranslationResponse> {
     let services = if request.services.is_empty() {
         vec!["OpenAI".to_string(), "DeepL".to_string(), "Alibaba".to_string(), "GoogleFree".to_string()]
     } else {
@@ -33,245 +50,186 @@ pub async fn translate(
             
             let result = match service_name.to_lowercase().as_str() {
                 "openai" => {
-                    // Check if API key is available
-                    let has_api_key = service_config
-                        .and_then(|config| config.get("apiKey"))
-                        .and_then(|key| key.as_str())
-                        .map(|key| !key.is_empty())
-                        .unwrap_or(false);
-                    
-                    if !has_api_key {
+                    if !check_api_key(service_config) {
                         println!("OpenAI service skipped - no API key configured");
-                        return TranslationResult {
-                            name: "OpenAI".to_string(),
-                            text: "".to_string(),
-                            error: Some("No API key configured".to_string()),
-                        };
+                        return make_error_result("OpenAI", "No API key configured");
                     }
                     
-                    match openai::translate(
-                        &text,
-                        &source_lang,
-                        &target_lang,
-                        service_config
-                    ).await {
+                    match openai::translate(&text, &source_lang, &target_lang, service_config).await {
                         Ok(mut result) => {
                             result.error = None;
                             result
                         },
                         Err(e) => {
                             println!("OpenAI translation error: {}", e);
-                            TranslationResult {
-                                name: "OpenAI".to_string(),
-                                text: "".to_string(),
-                                error: Some(e),
-                            }
+                            make_error_result("OpenAI", e)
+                        },
+                    }
+                }
+                "claude" => {
+                    if !check_api_key(service_config) {
+                        println!("Claude service skipped - no API key configured");
+                        return make_error_result("Claude", "No API key configured");
+                    }
+                    
+                    match claude::translate(&text, &source_lang, &target_lang, service_config).await {
+                        Ok(mut result) => {
+                            result.error = None;
+                            result
+                        },
+                        Err(e) => {
+                            println!("Claude translation error: {}", e);
+                            make_error_result("Claude", e)
+                        },
+                    }
+                }
+                "ernie" | "wenxin" | "文心一言" => {
+                    let has_api_key = service_config
+                        .and_then(|c| c.get("apiKey"))
+                        .and_then(|k| k.as_str())
+                        .map(|k| !k.is_empty())
+                        .unwrap_or(false);
+                    let has_secret_key = service_config
+                        .and_then(|c| c.get("secretKey"))
+                        .and_then(|k| k.as_str())
+                        .map(|k| !k.is_empty())
+                        .unwrap_or(false);
+                    
+                    if !has_api_key || !has_secret_key {
+                        println!("Ernie service skipped - API key or secret key not configured");
+                        return make_error_result("Ernie", "API key and secret key required");
+                    }
+                    
+                    match ernie::translate(&text, &source_lang, &target_lang, service_config).await {
+                        Ok(mut result) => {
+                            result.error = None;
+                            result
+                        },
+                        Err(e) => {
+                            println!("Ernie translation error: {}", e);
+                            make_error_result("Ernie", e)
                         },
                     }
                 }
                 "zhipu" => {
-                    // Check if API key is available
-                    let has_api_key = service_config
-                        .and_then(|config| config.get("apiKey"))
-                        .and_then(|key| key.as_str())
-                        .map(|key| !key.is_empty())
-                        .unwrap_or(false);
-                    
-                    if !has_api_key {
+                    if !check_api_key(service_config) {
                         println!("Zhipu service skipped - no API key configured");
-                        return TranslationResult {
-                            name: "Zhipu".to_string(),
-                            text: "".to_string(),
-                            error: Some("No API key configured".to_string()),
-                        };
+                        return make_error_result("Zhipu", "No API key configured");
                     }
                     
                     let mut config_obj = service_config.cloned().unwrap_or(serde_json::json!({}));
                     if let Some(obj) = config_obj.as_object_mut() {
-                         if !obj.contains_key("apiUrl") {
-                            obj.insert("apiUrl".to_string(), serde_json::Value::String("https://open.bigmodel.cn/api/paas/v4/chat/completions".to_string()));
-                        }
-                        if !obj.contains_key("model") {
-                            obj.insert("model".to_string(), serde_json::Value::String("glm-4-flash".to_string()));
-                        }
+                        obj.entry("apiUrl".to_string())
+                            .or_insert(serde_json::Value::String("https://open.bigmodel.cn/api/paas/v4/chat/completions".to_string()));
+                        obj.entry("model".to_string())
+                            .or_insert(serde_json::Value::String("glm-4-flash".to_string()));
                     }
                     
-                    match openai::translate(
-                        &text,
-                        &source_lang,
-                        &target_lang,
-                        Some(&config_obj)
-                    ).await {
-                         Ok(mut result) => {
+                    match openai::translate(&text, &source_lang, &target_lang, Some(&config_obj)).await {
+                        Ok(mut result) => {
                             result.name = "Zhipu".to_string();
                             result.error = None;
                             result
                         },
                         Err(e) => {
                             println!("Zhipu translation error: {}", e);
-                            TranslationResult {
-                                name: "Zhipu".to_string(),
-                                text: "".to_string(),
-                                error: Some(e),
-                            }
+                            make_error_result("Zhipu", e)
                         },
                     }
                 }
                 "groq" => {
                     let mut config_obj = service_config.cloned().unwrap_or(serde_json::json!({}));
                     if let Some(obj) = config_obj.as_object_mut() {
-                        if !obj.contains_key("apiUrl") {
-                            obj.insert("apiUrl".to_string(), serde_json::Value::String("https://api.groq.com/openai/v1/chat/completions".to_string()));
-                        }
-                        if !obj.contains_key("model") {
-                            obj.insert("model".to_string(), serde_json::Value::String("llama3-8b-8192".to_string()));
-                        }
+                        obj.entry("apiUrl".to_string())
+                            .or_insert(serde_json::Value::String("https://api.groq.com/openai/v1/chat/completions".to_string()));
+                        obj.entry("model".to_string())
+                            .or_insert(serde_json::Value::String("llama3-8b-8192".to_string()));
                     }
 
-                    match openai::translate(
-                        &text,
-                        &source_lang,
-                        &target_lang,
-                         Some(&config_obj)
-                    ).await {
-                         Ok(mut result) => {
+                    match openai::translate(&text, &source_lang, &target_lang, Some(&config_obj)).await {
+                        Ok(mut result) => {
                             result.name = "Groq".to_string();
                             result.error = None;
                             result
                         },
                         Err(e) => {
                             println!("Groq translation error: {}", e);
-                            TranslationResult {
-                                name: "Groq".to_string(),
-                                text: "".to_string(),
-                                error: Some(e),
-                            }
+                            make_error_result("Groq", e)
                         },
                     }
                 }
                 "gemini" => {
                     let mut config_obj = service_config.cloned().unwrap_or(serde_json::json!({}));
                     if let Some(obj) = config_obj.as_object_mut() {
-                        if !obj.contains_key("apiUrl") {
-                            obj.insert("apiUrl".to_string(), serde_json::Value::String("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".to_string()));
-                        }
-                        if !obj.contains_key("model") {
-                            obj.insert("model".to_string(), serde_json::Value::String("gemini-1.5-flash".to_string()));
-                        }
+                        obj.entry("apiUrl".to_string())
+                            .or_insert(serde_json::Value::String("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions".to_string()));
+                        obj.entry("model".to_string())
+                            .or_insert(serde_json::Value::String("gemini-1.5-flash".to_string()));
                     }
 
-                    match openai::translate(
-                        &text,
-                        &source_lang,
-                        &target_lang,
-                         Some(&config_obj)
-                    ).await {
-                         Ok(mut result) => {
+                    match openai::translate(&text, &source_lang, &target_lang, Some(&config_obj)).await {
+                        Ok(mut result) => {
                             result.name = "Gemini".to_string();
                             result.error = None;
                             result
                         },
                         Err(e) => {
                             println!("Gemini translation error: {}", e);
-                            TranslationResult {
-                                name: "Gemini".to_string(),
-                                text: "".to_string(),
-                                error: Some(e),
-                            }
+                            make_error_result("Gemini", e)
                         },
                     }
                 }
                 "deepl" => {
-                     match deepl::translate(
-                        &text,
-                        &source_lang,
-                        &target_lang,
-                        service_config
-                    ).await {
+                    match deepl::translate(&text, &source_lang, &target_lang, service_config).await {
                         Ok(mut result) => {
                             result.error = None;
                             result
                         },
                         Err(e) => {
                             println!("DeepL translation error: {}", e);
-                            TranslationResult {
-                                name: "DeepL".to_string(),
-                                text: "".to_string(),
-                                error: Some(e),
-                            }
+                            make_error_result("DeepL", e)
                         },
                     }
                 }
                 "google" => {
-                     match google::translate(
-                        &text,
-                        &source_lang,
-                        &target_lang,
-                        service_config
-                    ).await {
+                    match google::translate(&text, &source_lang, &target_lang, service_config).await {
                         Ok(mut result) => {
                             result.error = None;
                             result
                         },
                         Err(e) => {
                             println!("Google translation error: {}", e);
-                            TranslationResult {
-                                name: "Google".to_string(),
-                                text: "".to_string(),
-                                error: Some(e),
-                            }
+                            make_error_result("Google", e)
                         },
                     }
                 }
                 "alibaba" => {
-                     match alibaba::translate(
-                        &text,
-                        &source_lang,
-                        &target_lang,
-                        service_config
-                    ).await {
+                    match alibaba::translate(&text, &source_lang, &target_lang, service_config).await {
                         Ok(mut result) => {
                             result.error = None;
                             result
                         },
                         Err(e) => {
                             println!("Alibaba translation error: {}", e);
-                            TranslationResult {
-                                name: "Alibaba".to_string(),
-                                text: "".to_string(),
-                                error: Some(e),
-                            }
+                            make_error_result("Alibaba", e)
                         },
                     }
                 }
                 "googlefree" | "google native" => {
-                     match google_free::translate(
-                        &text,
-                        &source_lang,
-                        &target_lang,
-                        service_config
-                    ).await {
+                    match google_free::translate(&text, &source_lang, &target_lang, service_config).await {
                         Ok(mut result) => {
                             result.error = None;
                             result
                         },
                         Err(e) => {
                             println!("GoogleFree translation error: {}", e);
-                            TranslationResult {
-                                name: "GoogleFree".to_string(),
-                                text: "".to_string(),
-                                error: Some(e),
-                            }
+                            make_error_result("GoogleFree", e)
                         },
                     }
                 }
                 _ => {
                     println!("Unknown service: {}", service_name);
-                    TranslationResult {
-                        name: service_name.clone(),
-                        text: "".to_string(),
-                        error: Some("Service not supported".to_string()),
-                    }
+                    make_error_result(&service_name, "Service not supported")
                 }
             };
             
@@ -303,7 +261,7 @@ pub async fn translate(
     println!("Translation completed. Total results: {}", final_results.len());
 
     if final_results.is_empty() {
-        return Err("No translation services returned results".to_string());
+        return Err(AppError::Translation("No translation services returned results".to_string()));
     }
 
     Ok(TranslationResponse { results: final_results })
@@ -320,7 +278,7 @@ struct StreamPayload {
     all_done: bool,
 }
 
-pub async fn translate_stream(app: AppHandle, request: TranslationRequest, request_id: String) -> Result<(), String> {
+pub async fn translate_stream(app: AppHandle, request: TranslationRequest, request_id: String) -> Result<()> {
     let services = if request.services.is_empty() {
         vec!["OpenAI".to_string(), "DeepL".to_string(), "Alibaba".to_string(), "GoogleFree".to_string()]
     } else {
@@ -345,7 +303,7 @@ pub async fn translate_stream(app: AppHandle, request: TranslationRequest, reque
                 let _ = app_handle.emit("translation-stream", payload);
             };
 
-            let mut emit_error = |error: String| {
+            let emit_error = |error: String| {
                 emit(StreamPayload {
                     request_id: request_id_clone.clone(),
                     service: service_name.clone(),
@@ -359,13 +317,7 @@ pub async fn translate_stream(app: AppHandle, request: TranslationRequest, reque
 
             match service_name.to_lowercase().as_str() {
                 "openai" | "zhipu" | "groq" | "gemini" => {
-                    let has_api_key = service_config
-                        .and_then(|config| config.get("apiKey"))
-                        .and_then(|key| key.as_str())
-                        .map(|key| !key.is_empty())
-                        .unwrap_or(false);
-
-                    if !has_api_key {
+                    if !check_api_key(service_config) {
                         emit_error("No API key configured".to_string());
                         return;
                     }
@@ -395,14 +347,12 @@ pub async fn translate_stream(app: AppHandle, request: TranslationRequest, reque
                         }
                     }
 
-                    let mut streamed_text = String::new();
                     let result = openai::translate_stream(
                         &text,
                         &source_lang,
                         &target_lang,
                         Some(&config_obj),
                         |delta| {
-                            streamed_text.push_str(delta);
                             emit(StreamPayload {
                                 request_id: request_id_clone.clone(),
                                 service: service_name.clone(),
@@ -430,6 +380,101 @@ pub async fn translate_stream(app: AppHandle, request: TranslationRequest, reque
                         }
                         Err(e) => {
                             emit_error(e);
+                        }
+                    }
+                }
+                "claude" => {
+                    if !check_api_key(service_config) {
+                        emit_error("No API key configured".to_string());
+                        return;
+                    }
+
+                    let result = claude::translate_stream(
+                        &text,
+                        &source_lang,
+                        &target_lang,
+                        service_config,
+                        |delta| {
+                            emit(StreamPayload {
+                                request_id: request_id_clone.clone(),
+                                service: service_name.clone(),
+                                delta: Some(delta.to_string()),
+                                text: None,
+                                error: None,
+                                done: false,
+                                all_done: false,
+                            });
+                        },
+                    )
+                    .await;
+
+                    match result {
+                        Ok(final_text) => {
+                            emit(StreamPayload {
+                                request_id: request_id_clone.clone(),
+                                service: service_name.clone(),
+                                delta: None,
+                                text: Some(final_text),
+                                error: None,
+                                done: true,
+                                all_done: false,
+                            });
+                        }
+                        Err(e) => {
+                            emit_error(e.to_string());
+                        }
+                    }
+                }
+                "ernie" | "wenxin" | "文心一言" => {
+                    let has_api_key = service_config
+                        .and_then(|c| c.get("apiKey"))
+                        .and_then(|k| k.as_str())
+                        .map(|k| !k.is_empty())
+                        .unwrap_or(false);
+                    let has_secret_key = service_config
+                        .and_then(|c| c.get("secretKey"))
+                        .and_then(|k| k.as_str())
+                        .map(|k| !k.is_empty())
+                        .unwrap_or(false);
+                    
+                    if !has_api_key || !has_secret_key {
+                        emit_error("API key and secret key required".to_string());
+                        return;
+                    }
+
+                    let result = ernie::translate_stream(
+                        &text,
+                        &source_lang,
+                        &target_lang,
+                        service_config,
+                        |delta| {
+                            emit(StreamPayload {
+                                request_id: request_id_clone.clone(),
+                                service: service_name.clone(),
+                                delta: Some(delta.to_string()),
+                                text: None,
+                                error: None,
+                                done: false,
+                                all_done: false,
+                            });
+                        },
+                    )
+                    .await;
+
+                    match result {
+                        Ok(final_text) => {
+                            emit(StreamPayload {
+                                request_id: request_id_clone.clone(),
+                                service: service_name.clone(),
+                                delta: None,
+                                text: Some(final_text),
+                                error: None,
+                                done: true,
+                                all_done: false,
+                            });
+                        }
+                        Err(e) => {
+                            emit_error(e.to_string());
                         }
                     }
                 }
@@ -518,7 +563,7 @@ pub async fn translate_stream(app: AppHandle, request: TranslationRequest, reque
         "translation-stream",
         StreamPayload {
             request_id,
-            service: "".to_string(),
+            service: String::new(),
             delta: None,
             text: None,
             error: None,

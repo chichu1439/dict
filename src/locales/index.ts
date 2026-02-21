@@ -54,6 +54,7 @@ export const en = {
     services: {
       title: 'Translation Services',
       apiKey: 'API Key',
+      secretKey: 'Secret Key',
       accessKeyId: 'Access Key ID',
       accessKeySecret: 'Access Key Secret',
       noConfigRequired: 'No configuration required for Google Native (Free).',
@@ -164,6 +165,7 @@ export const zh = {
     services: {
       title: '翻译服务',
       apiKey: 'API 密钥',
+      secretKey: '密钥',
       accessKeyId: 'Access Key ID',
       accessKeySecret: 'Access Key Secret',
       noConfigRequired: 'Google 原生翻译（免费）无需配置。',

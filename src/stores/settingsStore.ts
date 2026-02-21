@@ -5,6 +5,9 @@ import { invoke } from '@tauri-apps/api/core'
 export interface ServiceConfig {
     name: string
     apiKey?: string
+    secretKey?: string
+    appId?: string
+    appKey?: string
     accessKeyId?: string
     accessKeySecret?: string
     enabled: boolean
@@ -70,6 +73,8 @@ const DEFAULT_SERVICES: ServiceConfig[] = [
     { name: 'GoogleFree', enabled: true },
     { name: 'DeepL', apiKey: '', enabled: false },
     { name: 'OpenAI', apiKey: '', enabled: false, model: 'gpt-3.5-turbo' },
+    { name: 'Claude', apiKey: '', enabled: false, model: 'claude-3-haiku-20240307' },
+    { name: 'Ernie', apiKey: '', secretKey: '', enabled: false, model: 'ernie-4.0-8k' },
     { name: 'Zhipu', apiKey: '', enabled: false, model: 'glm-4-flash' },
     { name: 'Groq', apiKey: '', enabled: false, model: 'llama3-8b-8192' },
     { name: 'Gemini', apiKey: '', enabled: false, model: 'gemini-1.5-flash' },

@@ -4,6 +4,8 @@ import { listen } from '@tauri-apps/api/event'
 import TranslationResult from './TranslationResult'
 import { useSettingsStore } from '../stores/settingsStore'
 import { useHistoryStore } from '../stores/historyStore'
+import { useTranslationCache } from '../stores/translationCacheStore'
+import { useRequestDedup } from '../stores/requestDedupStore'
 import { v4 as uuidv4 } from 'uuid'
 
 import { en, zh } from '../locales'
@@ -12,8 +14,8 @@ interface TranslationService {
   name: string
   text: string
   error?: string
+  fromCache?: boolean
 }
-
 
 export default function InputTranslation({ initialText, initialOcrInfo }: { initialText?: string; initialOcrInfo?: { confidence: number; language?: string } }) {
   const [inputText, setInputText] = useState(initialText || '')
@@ -26,56 +28,55 @@ export default function InputTranslation({ initialText, initialOcrInfo }: { init
   const resultsRef = useRef<TranslationService[]>([])
   const translationMetaRef = useRef<{ sourceLang: string; targetLang: string; text: string } | null>(null)
 
-  // Handle initial text and external events
+  const { services, sourceLang: defaultSource, targetLang: defaultTarget, loaded, loadSettings, uiLanguage } = useSettingsStore()
+  const { addToHistory } = useHistoryStore()
+  const { get: getCache, set: setCache } = useTranslationCache()
+  const { isPending, addPending, removePending } = useRequestDedup()
+  const t = uiLanguage === 'zh' ? zh.translate : en.translate
+
+  const [sourceLang, setSourceLang] = useState('auto')
+  const [targetLang, setTargetLang] = useState('zh')
+
   useEffect(() => {
     if (initialText) {
       setInputText(initialText)
       setOcrInfo(initialOcrInfo || null)
-      // Auto-trigger translation for shortcut-triggered text
       setTimeout(() => {
         handleTranslate()
       }, 300)
     }
   }, [initialText, initialOcrInfo])
 
-  // Handle external events
   useEffect(() => {
     const handleSelectTranslation = (e: Event) => {
-      const customEvent = e as CustomEvent;
+      const customEvent = e as CustomEvent
       if (customEvent.detail) {
-        const text = customEvent.detail;
-        console.log('Select translation event received:', text);
-        setInputText(text);
-        setOcrInfo(null);
+        const text = customEvent.detail
+        console.log('Select translation event received:', text)
+        setInputText(text)
+        setOcrInfo(null)
         setTimeout(() => {
-          handleTranslate();
-        }, 200);
+          handleTranslate()
+        }, 200)
       }
-    };
+    }
 
     const handleFocusInput = () => {
-      console.log('Focus input event received');
+      console.log('Focus input event received')
       if (inputRef.current) {
-        inputRef.current.focus();
-        inputRef.current.select();
+        inputRef.current.focus()
+        inputRef.current.select()
       }
-    };
+    }
 
-    window.addEventListener('trigger-select-translation', handleSelectTranslation);
-    window.addEventListener('focus-translation-input', handleFocusInput);
+    window.addEventListener('trigger-select-translation', handleSelectTranslation)
+    window.addEventListener('focus-translation-input', handleFocusInput)
 
     return () => {
-      window.removeEventListener('trigger-select-translation', handleSelectTranslation);
-      window.removeEventListener('focus-translation-input', handleFocusInput);
-    };
-  }, []);
-
-  const { services, sourceLang: defaultSource, targetLang: defaultTarget, loaded, loadSettings, uiLanguage } = useSettingsStore()
-  const { addToHistory } = useHistoryStore()
-  const t = uiLanguage === 'zh' ? zh.translate : en.translate
-
-  const [sourceLang, setSourceLang] = useState('auto')
-  const [targetLang, setTargetLang] = useState('zh')
+      window.removeEventListener('trigger-select-translation', handleSelectTranslation)
+      window.removeEventListener('focus-translation-input', handleFocusInput)
+    }
+  }, [])
 
   useEffect(() => {
     if (!loaded) loadSettings()
@@ -128,13 +129,22 @@ export default function InputTranslation({ initialText, initialOcrInfo }: { init
         const next = [...prev]
         const index = next.findIndex(r => r.name.toLowerCase() === payload.service.toLowerCase())
         if (index === -1) {
-          next.push({ name: payload.service, text: payload.text || payload.delta || '', })
+          next.push({ name: payload.service, text: payload.text || payload.delta || '' })
         } else {
           const current = next[index]
           if (payload.error) {
             next[index] = { ...current, error: payload.error }
           } else if (payload.text) {
             next[index] = { ...current, text: payload.text }
+            if (translationMetaRef.current) {
+              setCache(
+                translationMetaRef.current.text,
+                translationMetaRef.current.sourceLang,
+                translationMetaRef.current.targetLang,
+                payload.service,
+                { text: payload.text, timestamp: Date.now(), serviceName: payload.service }
+              )
+            }
           } else if (payload.delta) {
             next[index] = { ...current, text: (current.text || '') + payload.delta }
           }
@@ -147,7 +157,7 @@ export default function InputTranslation({ initialText, initialOcrInfo }: { init
     return () => {
       unlistenPromise.then(unlisten => unlisten())
     }
-  }, [addToHistory])
+  }, [addToHistory, setCache])
 
   const detectLanguage = (text: string): string => {
     const chineseRegex = /[\u4e00-\u9fa5\u3400-\u4dbf]/
@@ -164,12 +174,11 @@ export default function InputTranslation({ initialText, initialOcrInfo }: { init
     setHasSearched(true)
     setResults([])
 
-    // Check if running in a browser (where Tauri API is missing)
     // @ts-ignore
     if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
-      alert('Tauri API not found. Please run this app using "npm run tauri:dev" or the built executable, not a standard browser.');
-      setIsLoading(false);
-      return;
+      alert('Tauri API not found. Please run this app using "npm run tauri:dev" or the built executable, not a standard browser.')
+      setIsLoading(false)
+      return
     }
 
     try {
@@ -178,38 +187,88 @@ export default function InputTranslation({ initialText, initialOcrInfo }: { init
 
       const enabledServices = services.filter(s => s.enabled)
       const serviceNames = enabledServices.map(s => s.name)
+      
+      if (isPending(inputText, detected, target, serviceNames)) {
+        console.log('Request already pending, skipping duplicate')
+        setIsLoading(false)
+        return
+      }
+
+      const requestKey = addPending(inputText, detected, target, serviceNames)
 
       const config: Record<string, any> = {}
       for (const s of enabledServices) {
         config[s.name.toLowerCase()] = {
           apiKey: s.apiKey,
+          secretKey: s.secretKey,
           accessKeyId: s.accessKeyId,
           accessKeySecret: s.accessKeySecret,
           model: s.model
         }
       }
 
-      console.log('Sending translation request:', {
-        text: inputText,
-        source_lang: detected,
-        target_lang: target,
-        services: serviceNames,
-      });
-
       const requestId = uuidv4()
       currentRequestIdRef.current = requestId
       translationMetaRef.current = { sourceLang: detected, targetLang: target, text: inputText }
 
-      const initialResults = enabledServices.map(s => ({ name: s.name, text: '' }))
+      const cachedResults: TranslationService[] = []
+      const servicesToFetch: typeof enabledServices = []
+
+      for (const service of enabledServices) {
+        const cached = getCache(inputText, detected, target, service.name)
+        if (cached) {
+          cachedResults.push({ name: service.name, text: cached.text, fromCache: true })
+        } else {
+          servicesToFetch.push(service)
+        }
+      }
+
+      const initialResults = enabledServices.map(s => {
+        const cached = cachedResults.find(r => r.name === s.name)
+        return cached || { name: s.name, text: '' }
+      })
       setResults(initialResults)
       resultsRef.current = initialResults
+
+      if (cachedResults.length > 0) {
+        console.log(`Cache hits: ${cachedResults.length}/${enabledServices.length}`)
+      }
+
+      if (servicesToFetch.length === 0) {
+        setIsLoading(false)
+        setHasSearched(true)
+        removePending(requestKey)
+        if (cachedResults.length > 0) {
+          addToHistory({
+            id: uuidv4(),
+            sourceText: inputText,
+            targetText: cachedResults.map(r => r.text).join(' '),
+            sourceLang: detected,
+            targetLang: target,
+            services: cachedResults.map(r => r.name),
+            timestamp: Date.now(),
+            isFavorite: false
+          })
+        }
+        return
+      }
+
+      const serviceNamesToFetch = servicesToFetch.map(s => s.name)
+
+      console.log('Sending translation request:', {
+        text: inputText,
+        source_lang: detected,
+        target_lang: target,
+        services: serviceNamesToFetch,
+        cached: cachedResults.length
+      })
 
       await invoke('translate_stream', {
         request: {
           text: inputText,
           source_lang: detected,
           target_lang: target,
-          services: serviceNames,
+          services: serviceNamesToFetch,
           config: config
         },
         requestId
@@ -217,11 +276,11 @@ export default function InputTranslation({ initialText, initialOcrInfo }: { init
     } catch (error) {
       console.error('Translation error:', error)
       setResults([])
-      const errorStr = String(error);
+      const errorStr = String(error)
       if (errorStr.includes('API key') || errorStr.includes('access')) {
-        alert('Translation Error: Please configure API keys in Settings > Services for the enabled translation services.');
+        alert('Translation Error: Please configure API keys in Settings > Services for the enabled translation services.')
       } else {
-        alert('Translation Error: ' + errorStr);
+        alert('Translation Error: ' + errorStr)
       }
     } finally {
       setIsLoading(false)
@@ -277,12 +336,12 @@ export default function InputTranslation({ initialText, initialOcrInfo }: { init
 
             <div className="w-px h-6 bg-[var(--ui-border)] shrink-0"></div>
 
-            <button 
+            <button
               className="p-2 h-10 w-10 flex items-center justify-center rounded-lg hover:bg-[var(--ui-surface-2)] text-[var(--ui-muted)] hover:text-[var(--ui-text)] transition-colors cursor-pointer shrink-0"
               onClick={() => {
-                const temp = sourceLang;
-                setSourceLang(targetLang);
-                setTargetLang(temp === 'auto' ? 'en' : temp);
+                const temp = sourceLang
+                setSourceLang(targetLang)
+                setTargetLang(temp === 'auto' ? 'en' : temp)
               }}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

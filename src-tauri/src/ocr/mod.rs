@@ -1,8 +1,9 @@
 pub mod models;
+pub mod mathpix;
 
 use crate::ocr::models::{OcrRequest, OcrResult as AppOcrResult};
+use crate::error::{AppError, Result};
 
-// Windows-specific OCR implementation
 #[cfg(target_os = "windows")]
 use windows::{
     Graphics::Imaging::BitmapDecoder,
@@ -17,30 +18,25 @@ use windows::{
 #[cfg(target_os = "windows")]
 use base64::{Engine as _, engine::general_purpose};
 
-// Cross-platform screenshot capture trait
 pub trait ScreenshotCapture {
-    fn capture_screen(&self, x: i32, y: i32, w: i32, h: i32) -> Result<String, String>;
-    fn capture_and_ocr(&self, x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<AppOcrResult, String>;
+    fn capture_screen(&self, x: i32, y: i32, w: i32, h: i32) -> Result<String>;
+    #[allow(dead_code)]
+    fn capture_and_ocr(&self, x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<AppOcrResult>;
 }
 
-// Windows implementation
 #[cfg(target_os = "windows")]
 struct WindowsOcr;
 
 #[cfg(target_os = "windows")]
 impl ScreenshotCapture for WindowsOcr {
-    fn capture_screen(&self, x: i32, y: i32, w: i32, h: i32) -> Result<String, String> {
+    fn capture_screen(&self, x: i32, y: i32, w: i32, h: i32) -> Result<String> {
         let (pixels, w, h) = unsafe { capture_bitmap(x, y, w, h)? };
         let bmp_data = create_bmp_file(&pixels, w, h);
         Ok(general_purpose::STANDARD.encode(&bmp_data))
     }
     
-    fn capture_and_ocr(&self, x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<AppOcrResult, String> {
-        // This function is kept for trait compatibility but might cause issues with block_on
-        // Prefer using the standalone capture_and_ocr function which handles async correctly
+    fn capture_and_ocr(&self, x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<AppOcrResult> {
         let (raw_pixels, w, h) = unsafe { capture_bitmap(x, y, w, h)? };
-        
-        // Use preprocess image here too for consistency?
         let (processed_pixels, new_w, new_h) = preprocess_image(&raw_pixels, w, h);
         let bmp_data = create_bmp_file(&processed_pixels, new_w, new_h);
 
@@ -49,22 +45,20 @@ impl ScreenshotCapture for WindowsOcr {
     }
 }
 
-// Fallback implementation using Tesseract.js for other platforms
 #[cfg(not(target_os = "windows"))]
 struct FallbackOcr;
 
 #[cfg(not(target_os = "windows"))]
 impl ScreenshotCapture for FallbackOcr {
-    fn capture_screen(&self, _x: i32, _y: i32, _w: i32, _h: i32) -> Result<String, String> {
-        Err("Screenshot capture requires native implementation. Use external tools or implement platform-specific capture.".to_string())
+    fn capture_screen(&self, _x: i32, _y: i32, _w: i32, _h: i32) -> Result<String> {
+        Err(AppError::PlatformNotSupported("Screenshot capture requires native implementation".to_string()))
     }
     
-    fn capture_and_ocr(&self, _x: i32, _y: i32, _w: i32, _h: i32, _language: Option<String>) -> Result<AppOcrResult, String> {
-        Err("Native OCR not available on this platform. Consider using Tesseract.js or cloud OCR services.".to_string())
+    fn capture_and_ocr(&self, _x: i32, _y: i32, _w: i32, _h: i32, _language: Option<String>) -> Result<AppOcrResult> {
+        Err(AppError::PlatformNotSupported("Native OCR not available on this platform".to_string()))
     }
 }
 
-// Factory function to get appropriate OCR implementation
 fn get_ocr_impl() -> Box<dyn ScreenshotCapture> {
     #[cfg(target_os = "windows")]
     {
@@ -76,9 +70,8 @@ fn get_ocr_impl() -> Box<dyn ScreenshotCapture> {
     }
 }
 
-// Windows-specific bitmap capture function
 #[cfg(target_os = "windows")]
-unsafe fn capture_bitmap(x: i32, y: i32, w: i32, h: i32) -> Result<(Vec<u8>, i32, i32), String> {
+unsafe fn capture_bitmap(x: i32, y: i32, w: i32, h: i32) -> Result<(Vec<u8>, i32, i32)> {
     let hwnd = GetDesktopWindow();
     let hdc_screen = GetDC(hwnd);
     let hdc_mem = CreateCompatibleDC(hdc_screen);
@@ -86,19 +79,17 @@ unsafe fn capture_bitmap(x: i32, y: i32, w: i32, h: i32) -> Result<(Vec<u8>, i32
     let hbm_screen = CreateCompatibleBitmap(hdc_screen, w, h);
     SelectObject(hdc_mem, hbm_screen);
     
-    // BitBlt from screen to memory DC
     if BitBlt(hdc_mem, 0, 0, w, h, hdc_screen, x, y, SRCCOPY).is_err() {
         DeleteObject(hbm_screen);
         DeleteDC(hdc_mem);
         ReleaseDC(hwnd, hdc_screen);
-        return Err("BitBlt failed".to_string());
+        return Err(AppError::Ocr("BitBlt failed".to_string()));
     }
     
-    // Prepare to get bits
     let mut bi = BITMAPINFOHEADER {
         biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
         biWidth: w,
-        biHeight: -h, // Top-down
+        biHeight: -h,
         biPlanes: 1,
         biBitCount: 32,
         biCompression: BI_RGB.0,
@@ -119,10 +110,9 @@ unsafe fn capture_bitmap(x: i32, y: i32, w: i32, h: i32) -> Result<(Vec<u8>, i32
         DeleteObject(hbm_screen);
         DeleteDC(hdc_mem);
         ReleaseDC(hwnd, hdc_screen);
-        return Err("GetDIBits failed".to_string());
+        return Err(AppError::Ocr("GetDIBits failed".to_string()));
     }
     
-    // Cleanup GDI objects
     DeleteObject(hbm_screen);
     DeleteDC(hdc_mem);
     ReleaseDC(hwnd, hdc_screen);
@@ -130,40 +120,71 @@ unsafe fn capture_bitmap(x: i32, y: i32, w: i32, h: i32) -> Result<(Vec<u8>, i32
     Ok((pixels, w, h))
 }
 
-// Helper to create BMP file format from raw pixels
 #[cfg(target_os = "windows")]
 fn create_bmp_file(pixels: &[u8], w: i32, h: i32) -> Vec<u8> {
     let mut bmp_data = Vec::new();
     
-    // Bitmap File Header (14 bytes)
     let file_size = 14 + 40 + pixels.len() as u32;
-    bmp_data.extend_from_slice(b"BM"); // Signature
-    bmp_data.extend_from_slice(&file_size.to_le_bytes()); // File size
-    bmp_data.extend_from_slice(&0u32.to_le_bytes()); // Reserved
-    bmp_data.extend_from_slice(&(14 + 40 as u32).to_le_bytes()); // Offset to pixel data
+    bmp_data.extend_from_slice(b"BM");
+    bmp_data.extend_from_slice(&file_size.to_le_bytes());
+    bmp_data.extend_from_slice(&0u32.to_le_bytes());
+    bmp_data.extend_from_slice(&(14 + 40 as u32).to_le_bytes());
     
-    // Bitmap Info Header (40 bytes)
     let bi_size = 40u32;
     bmp_data.extend_from_slice(&bi_size.to_le_bytes());
     bmp_data.extend_from_slice(&w.to_le_bytes());
-    bmp_data.extend_from_slice(&(-h).to_le_bytes()); // Top-down
-    bmp_data.extend_from_slice(&1u16.to_le_bytes()); // Planes
-    bmp_data.extend_from_slice(&32u16.to_le_bytes()); // BitCount
-    bmp_data.extend_from_slice(&0u32.to_le_bytes()); // Compression (BI_RGB)
-    bmp_data.extend_from_slice(&(pixels.len() as u32).to_le_bytes()); // SizeImage
-    bmp_data.extend_from_slice(&3780u32.to_le_bytes()); // XPelsPerMeter (96 DPI)
-    bmp_data.extend_from_slice(&3780u32.to_le_bytes()); // YPelsPerMeter
-    bmp_data.extend_from_slice(&0u32.to_le_bytes()); // ClrUsed
-    bmp_data.extend_from_slice(&0u32.to_le_bytes()); // ClrImportant
+    bmp_data.extend_from_slice(&(-h).to_le_bytes());
+    bmp_data.extend_from_slice(&1u16.to_le_bytes());
+    bmp_data.extend_from_slice(&32u16.to_le_bytes());
+    bmp_data.extend_from_slice(&0u32.to_le_bytes());
+    bmp_data.extend_from_slice(&(pixels.len() as u32).to_le_bytes());
+    bmp_data.extend_from_slice(&3780u32.to_le_bytes());
+    bmp_data.extend_from_slice(&3780u32.to_le_bytes());
+    bmp_data.extend_from_slice(&0u32.to_le_bytes());
+    bmp_data.extend_from_slice(&0u32.to_le_bytes());
     
-    // Pixel Data
     bmp_data.extend_from_slice(pixels);
     
     bmp_data
 }
 
-// Image processing: Upscale 2x and add padding
-// This significantly improves OCR accuracy for small text
+#[cfg(target_os = "windows")]
+fn bilinear_interpolate(pixels: &[u8], w: i32, h: i32, x: f64, y: f64) -> (u8, u8, u8, u8) {
+    let x0 = x.floor() as i32;
+    let y0 = y.floor() as i32;
+    let x1 = (x0 + 1).min(w - 1);
+    let y1 = (y0 + 1).min(h - 1);
+    let x0_clamped = x0.max(0).min(w - 1);
+    let y0_clamped = y0.max(0).min(h - 1);
+    
+    let dx = x - x0 as f64;
+    let dy = y - y0 as f64;
+    
+    let idx = |px: i32, py: i32| -> usize {
+        ((py * w + px) * 4) as usize
+    };
+    
+    let i00 = idx(x0_clamped, y0_clamped);
+    let i10 = idx(x1, y0_clamped);
+    let i01 = idx(x0_clamped, y1);
+    let i11 = idx(x1, y1);
+    
+    let interp = |c: usize| -> u8 {
+        let v00 = pixels[i00 + c] as f64;
+        let v10 = pixels[i10 + c] as f64;
+        let v01 = pixels[i01 + c] as f64;
+        let v11 = pixels[i11 + c] as f64;
+        
+        let top = v00 * (1.0 - dx) + v10 * dx;
+        let bottom = v01 * (1.0 - dx) + v11 * dx;
+        let value = top * (1.0 - dy) + bottom * dy;
+        
+        value.round().clamp(0.0, 255.0) as u8
+    };
+    
+    (interp(0), interp(1), interp(2), interp(3))
+}
+
 #[cfg(target_os = "windows")]
 fn preprocess_image(src_pixels: &[u8], w: i32, h: i32) -> (Vec<u8>, i32, i32) {
     let scale = 2;
@@ -171,101 +192,86 @@ fn preprocess_image(src_pixels: &[u8], w: i32, h: i32) -> (Vec<u8>, i32, i32) {
     
     let new_w = w * scale + padding * 2;
     let new_h = h * scale + padding * 2;
-    let mut new_pixels = vec![255u8; (new_w * new_h * 4) as usize]; // Initialize with white background
+    let mut new_pixels = vec![255u8; (new_w * new_h * 4) as usize];
     
-    // Simple nearest neighbor upscaling + padding
-    for y in 0..h {
-        for x in 0..w {
-            let src_idx = ((y * w + x) * 4) as usize;
-            let b = src_pixels[src_idx];
-            let g = src_pixels[src_idx + 1];
-            let r = src_pixels[src_idx + 2];
-            let a = src_pixels[src_idx + 3]; // Usually ignored for OCR, but keep it consistent
+    let scale_f = scale as f64;
+    
+    for dest_y in 0..(h * scale) {
+        for dest_x in 0..(w * scale) {
+            let src_x = (dest_x as f64) / scale_f;
+            let src_y = (dest_y as f64) / scale_f;
             
-            // Map to destination coordinates (with padding)
-            let dest_y_start = y * scale + padding;
-            let dest_x_start = x * scale + padding;
+            let (b, g, r, a) = bilinear_interpolate(src_pixels, w, h, src_x, src_y);
             
-            // Fill scale*scale block
-            for dy in 0..scale {
-                for dx in 0..scale {
-                    let dest_idx = (((dest_y_start + dy) * new_w + (dest_x_start + dx)) * 4) as usize;
-                    new_pixels[dest_idx] = b;
-                    new_pixels[dest_idx + 1] = g;
-                    new_pixels[dest_idx + 2] = r;
-                    new_pixels[dest_idx + 3] = a;
-                }
-            }
+            let dest_idx = (((dest_y + padding) * new_w + (dest_x + padding)) * 4) as usize;
+            new_pixels[dest_idx] = b;
+            new_pixels[dest_idx + 1] = g;
+            new_pixels[dest_idx + 2] = r;
+            new_pixels[dest_idx + 3] = a;
         }
     }
     
     (new_pixels, new_w, new_h)
 }
 
-// Windows-specific OCR implementation
 #[cfg(target_os = "windows")]
-async fn recognize_bytes(image_data: Vec<u8>, language: Option<String>) -> Result<AppOcrResult, String> {
-    // Create stream from bytes
+async fn recognize_bytes(image_data: Vec<u8>, language: Option<String>) -> Result<AppOcrResult> {
     let stream = InMemoryRandomAccessStream::new()
-        .map_err(|e| format!("Failed to create stream: {}", e))?;
+        .map_err(|e| AppError::Ocr(format!("Failed to create stream: {}", e)))?;
     
     let writer = DataWriter::CreateDataWriter(&stream
         .GetOutputStreamAt(0)
-        .map_err(|e| format!("Failed to get output stream: {}", e))?)
-        .map_err(|e| format!("Failed to create data writer: {}", e))?;
+        .map_err(|e| AppError::Ocr(format!("Failed to get output stream: {}", e)))?)
+        .map_err(|e| AppError::Ocr(format!("Failed to create data writer: {}", e)))?;
     
     writer.WriteBytes(&image_data)
-        .map_err(|e| format!("Failed to write bytes: {}", e))?;
+        .map_err(|e| AppError::Ocr(format!("Failed to write bytes: {}", e)))?;
     
     writer
         .StoreAsync()
-        .map_err(|e| format!("Failed to store async: {}", e))?
+        .map_err(|e| AppError::Ocr(format!("Failed to store async: {}", e)))?
         .await
-        .map_err(|e| format!("Failed to await store: {}", e))?;
+        .map_err(|e| AppError::Ocr(format!("Failed to await store: {}", e)))?;
         
     writer
         .FlushAsync()
-        .map_err(|e| format!("Failed to flush async: {}", e))?
+        .map_err(|e| AppError::Ocr(format!("Failed to flush async: {}", e)))?
         .await
-        .map_err(|e| format!("Failed to await flush: {}", e))?;
+        .map_err(|e| AppError::Ocr(format!("Failed to await flush: {}", e)))?;
         
     writer.DetachStream()
-        .map_err(|e| format!("Failed to detach stream: {}", e))?;
+        .map_err(|e| AppError::Ocr(format!("Failed to detach stream: {}", e)))?;
         
     stream.Seek(0)
-        .map_err(|e| format!("Failed to seek stream: {}", e))?;
+        .map_err(|e| AppError::Ocr(format!("Failed to seek stream: {}", e)))?;
 
-    // Create decoder and bitmap
     println!("Creating bitmap decoder from stream...");
     let decoder = BitmapDecoder::CreateAsync(&stream)
-        .map_err(|e| format!("Failed to create decoder: {}", e))?
+        .map_err(|e| AppError::Ocr(format!("Failed to create decoder: {}", e)))?
         .await
-        .map_err(|e| format!("Failed to await decoder: {}", e))?;
+        .map_err(|e| AppError::Ocr(format!("Failed to await decoder: {}", e)))?;
     
     println!("Bitmap decoder created successfully");
 
     println!("Getting software bitmap from decoder...");
     let bitmap = decoder
         .GetSoftwareBitmapAsync()
-        .map_err(|e| format!("Failed to get software bitmap: {}", e))?
+        .map_err(|e| AppError::Ocr(format!("Failed to get software bitmap: {}", e)))?
         .await
-        .map_err(|e| format!("Failed to await software bitmap: {}", e))?;
+        .map_err(|e| AppError::Ocr(format!("Failed to await software bitmap: {}", e)))?;
     
     println!("Software bitmap created successfully");
 
-    // OCR
     println!("Creating Windows OCR engine with language: {:?}", language);
     let engine = match language.as_deref() {
         Some(lang) if lang != "auto" => {
-            // Try to match specific language tags first
-            // Windows OCR uses BCP-47 tags
             let tag = match lang {
                 "zh" | "zh-CN" => "zh-Hans",
                 "zh-TW" => "zh-Hant",
                 "en" => "en-US",
                 "ja" => "ja-JP",
                 "ko" => "ko-KR",
-                other => other, // Pass through other tags like "de", "fr", etc.
+                other => other,
             };
             println!("Trying to create language from tag: {}", tag);
             let h = HSTRING::from(tag);
@@ -276,21 +282,21 @@ async fn recognize_bytes(image_data: Vec<u8>, language: Option<String>) -> Resul
                         Err(err) => {
                             println!("Failed to create OCR engine from language {}, falling back to user profile: {}", tag, err);
                             OcrEngine::TryCreateFromUserProfileLanguages()
-                                .map_err(|e| format!("Failed to create OCR engine from user profile: {}", e))?
+                                .map_err(|e| AppError::Ocr(format!("Failed to create OCR engine from user profile: {}", e)))?
                         }
                     }
                 },
                 Err(err) => {
                     println!("Failed to create Language object for {}, falling back to user profile: {}", tag, err);
                     OcrEngine::TryCreateFromUserProfileLanguages()
-                        .map_err(|e| format!("Failed to create OCR engine from user profile: {}", e))?
+                        .map_err(|e| AppError::Ocr(format!("Failed to create OCR engine from user profile: {}", e)))?
                 }
             }
         }
         _ => {
             println!("Using user profile languages for OCR (auto mode)");
             OcrEngine::TryCreateFromUserProfileLanguages()
-                .map_err(|e| format!("Failed to create OCR engine from user profile: {}", e))?
+                .map_err(|e| AppError::Ocr(format!("Failed to create OCR engine from user profile: {}", e)))?
         }
     };
     
@@ -299,9 +305,9 @@ async fn recognize_bytes(image_data: Vec<u8>, language: Option<String>) -> Resul
     println!("Starting OCR recognition on bitmap...");
     let result = engine
         .RecognizeAsync(&bitmap)
-        .map_err(|e| format!("Failed to initiate OCR: {}", e))?
+        .map_err(|e| AppError::Ocr(format!("Failed to initiate OCR: {}", e)))?
         .await
-        .map_err(|e| format!("OCR execution failed: {}", e))?;
+        .map_err(|e| AppError::Ocr(format!("OCR execution failed: {}", e)))?;
     
     println!("OCR recognition completed");
 
@@ -333,8 +339,7 @@ async fn recognize_bytes(image_data: Vec<u8>, language: Option<String>) -> Resul
     })
 }
 
-// Main OCR function with improved error handling
-pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
+pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult> {
     println!("Starting OCR processing...");
     
     let image_data = if let Some(path) = request.image_path {
@@ -345,7 +350,7 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
                 data
             }
             Err(e) => {
-                return Err(format!("Failed to read image file '{}': {}", path, e));
+                return Err(AppError::Io(e));
             }
         }
     } else if let Some(data) = request.image_data {
@@ -358,16 +363,16 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
                     decoded
                 }
                 Err(e) => {
-                    return Err(format!("Failed to decode base64 image data: {}", e));
+                    return Err(AppError::Ocr(format!("Failed to decode base64 image data: {}", e)));
                 }
             }
         }
         #[cfg(not(target_os = "windows"))]
         {
-            return Err("Base64 image decoding not supported on this platform".to_string());
+            return Err(AppError::PlatformNotSupported("Base64 image decoding not supported on this platform".to_string()));
         }
     } else {
-        return Err("No image data provided. Please provide either image_path or image_data.".to_string());
+        return Err(AppError::InvalidRequest("No image data provided. Please provide either image_path or image_data.".to_string()));
     };
 
     println!("Processing image with OCR, size: {} bytes", image_data.len());
@@ -381,41 +386,34 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult, String> {
             }
             Err(e) => {
                 println!("OCR processing failed: {}", e);
-                Err(format!("OCR processing failed: {}", e))
+                Err(e)
             }
         }
     }
     #[cfg(not(target_os = "windows"))]
     {
-        Err("Windows OCR API is only available on Windows platform. Consider using Tesseract.js as fallback on other platforms.".to_string())
+        Err(AppError::PlatformNotSupported("Windows OCR API is only available on Windows platform".to_string()))
     }
 }
 
-// Screenshot capture function
-pub async fn capture_screen(x: i32, y: i32, w: i32, h: i32) -> Result<String, String> {
+pub async fn capture_screen(x: i32, y: i32, w: i32, h: i32) -> Result<String> {
     println!("Capturing screenshot at ({}, {}) size ({}x{})", x, y, w, h);
     let ocr_impl = get_ocr_impl();
     ocr_impl.capture_screen(x, y, w, h)
 }
 
-// Combined screenshot and OCR function
-pub async fn capture_and_ocr(x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<AppOcrResult, String> {
+pub async fn capture_and_ocr(x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<AppOcrResult> {
     println!("Capturing and performing OCR at ({}, {}) size ({}x{})", x, y, w, h);
     
     #[cfg(target_os = "windows")]
     {
-        // Capture bitmap (synchronous but fast enough, or could wrap in spawn_blocking if needed)
-        // GDI capture is usually fast.
         let (raw_pixels, w, h) = unsafe { capture_bitmap(x, y, w, h)? };
         
-        // Preprocess image (Upscale + Padding) to improve OCR accuracy
         println!("Preprocessing image: {}x{} -> Upscaling 2x with padding", w, h);
         let (processed_pixels, new_w, new_h) = preprocess_image(&raw_pixels, w, h);
         
-        // Create BMP file format
         let bmp_data = create_bmp_file(&processed_pixels, new_w, new_h);
         
-        // Run OCR (async)
         recognize_bytes(bmp_data, language).await
     }
     

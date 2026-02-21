@@ -15,6 +15,8 @@ const LANGUAGES = [
 
 const SERVICE_MODELS: Record<string, string[]> = {
   'OpenAI': ['gpt-3.5-turbo', 'gpt-4o', 'gpt-4-turbo', 'gpt-4o-mini'],
+  'Claude': ['claude-3-haiku-20240307', 'claude-3-sonnet-20240229', 'claude-3-opus-20240229', 'claude-3-5-sonnet-20241022'],
+  'Ernie': ['ernie-4.0-8k', 'ernie-3.5-8k', 'ernie-speed-8k', 'ernie-lite-8k'],
   'Gemini': ['gemini-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'],
   'Zhipu': ['glm-4', 'glm-4-flash', 'glm-4-plus', 'glm-4-air', 'glm-3-turbo'],
   'Groq': ['llama3-8b-8192', 'llama3-70b-8192', 'mixtral-8x7b-32768', 'gemma-7b-it'],
@@ -128,6 +130,29 @@ export default function Settings({ onClose }: { onClose: () => void }) {
                 type="password"
                 value={service.accessKeySecret || ''}
                 onChange={(e) => updateService(selectedServiceIndex, { accessKeySecret: e.target.value })}
+                className="w-full bg-[var(--ui-surface-2)] border border-[var(--ui-border)] rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[var(--ui-accent)]/30 focus:border-[var(--ui-accent)] text-[var(--ui-text)]"
+              />
+            </div>
+          </div>
+        ) : service.name === 'Ernie' ? (
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-[var(--ui-muted)] mb-1">{t.services.apiKey}</label>
+              <input
+                type="password"
+                value={service.apiKey || ''}
+                onChange={(e) => updateService(selectedServiceIndex, { apiKey: e.target.value })}
+                placeholder="API Key"
+                className="w-full bg-[var(--ui-surface-2)] border border-[var(--ui-border)] rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[var(--ui-accent)]/30 focus:border-[var(--ui-accent)] text-[var(--ui-text)]"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-[var(--ui-muted)] mb-1">{t.services.secretKey || 'Secret Key'}</label>
+              <input
+                type="password"
+                value={service.secretKey || ''}
+                onChange={(e) => updateService(selectedServiceIndex, { secretKey: e.target.value })}
+                placeholder="Secret Key"
                 className="w-full bg-[var(--ui-surface-2)] border border-[var(--ui-border)] rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[var(--ui-accent)]/30 focus:border-[var(--ui-accent)] text-[var(--ui-text)]"
               />
             </div>

@@ -1,44 +1,58 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod error;
 mod models;
 mod ocr;
 mod hotkey;
 mod tts;
 mod services;
 
+use error::AppError;
 use models::{TranslationRequest, TranslationResponse};
 use ocr::models::{OcrRequest, OcrResult};
+use ocr::mathpix::{MathpixRequest, MathpixResult};
 use tts::models::{TtsRequest, TtsResponse};
+
+fn error_to_string<E: Into<AppError>>(err: E) -> String {
+    err.into().to_string()
+}
 
 #[tauri::command]
 async fn translate(request: TranslationRequest) -> Result<TranslationResponse, String> {
-    services::translate(request).await
+    services::translate(request).await.map_err(error_to_string)
 }
 
 #[tauri::command]
 async fn translate_stream(app: tauri::AppHandle, request: TranslationRequest, request_id: String) -> Result<(), String> {
-    services::translate_stream(app, request, request_id).await
+    services::translate_stream(app, request, request_id).await.map_err(error_to_string)
 }
 
 #[tauri::command]
 async fn ocr(request: OcrRequest) -> Result<OcrResult, String> {
-    ocr::perform_ocr(request).await
+    ocr::perform_ocr(request).await.map_err(|e: AppError| e.to_string())
 }
 
 #[tauri::command]
 async fn capture_and_ocr(x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<OcrResult, String> {
-    ocr::capture_and_ocr(x, y, w, h, language).await
+    ocr::capture_and_ocr(x, y, w, h, language).await.map_err(|e: AppError| e.to_string())
 }
 
 #[tauri::command]
 async fn capture_screen(x: i32, y: i32, w: i32, h: i32) -> Result<String, String> {
-    ocr::capture_screen(x, y, w, h).await
+    ocr::capture_screen(x, y, w, h).await.map_err(|e: AppError| e.to_string())
 }
 
 #[tauri::command]
 async fn speak(request: TtsRequest) -> Result<TtsResponse, String> {
-    tts::speak(request).await
+    tts::speak(request).await.map_err(|e: AppError| e.to_string())
+}
+
+#[tauri::command]
+async fn recognize_formula(request: MathpixRequest, config: Option<serde_json::Value>) -> Result<MathpixResult, String> {
+    ocr::mathpix::recognize_formula(request.image_data, request.image_url, config.as_ref())
+        .await
+        .map_err(|e: AppError| e.to_string())
 }
 
 use serde::Serialize;
@@ -83,7 +97,7 @@ async fn get_mouse_monitor() -> Result<MonitorInfo, String> {
             }
         }
     }
-    Err("Not supported on this platform".to_string())
+    Err(AppError::PlatformNotSupported("Monitor info only available on Windows".to_string()).to_string())
 }
 
 use tauri::Emitter;
@@ -92,33 +106,18 @@ use tauri::Manager;
 #[tauri::command]
 async fn emit_to_main<R: tauri::Runtime>(app: tauri::AppHandle<R>, event: String, payload: String) -> Result<(), String> {
     if let Some(main) = app.get_webview_window("main") {
-        // Force window to foreground
-        // Unminimize first
         if let Ok(is_minimized) = main.is_minimized() {
             if is_minimized {
                 let _ = main.unminimize();
             }
         }
         
-        // Show window
         let _ = main.show();
-        
-        // Focus window
         let _ = main.set_focus();
-        
-        // Force activate on Windows
-        #[cfg(target_os = "windows")]
-        {
-            // Optional: Use Win32 API to force foreground if set_focus fails
-            // But usually set_focus works if called from backend user interaction chain
-        }
 
-        // We need to parse the payload back to JSON or send as string?
-        // Let's send as string and let frontend parse it, or use emit directly if we can
-        // But emit takes Serialize. String is Serialize.
-        main.emit(&event, payload).map_err(|e| e.to_string())
+        main.emit(&event, payload).map_err(|e| AppError::Unknown(e.to_string()).to_string())
     } else {
-        Err("Main window not found".to_string())
+        Err(AppError::Unknown("Main window not found".to_string()).to_string())
     }
 }
 
@@ -142,7 +141,8 @@ fn main() {
             ocr, 
             capture_and_ocr, 
             capture_screen, 
-            speak, 
+            speak,
+            recognize_formula,
             hotkey::get_hotkeys, 
             hotkey::set_hotkey, 
             hotkey::register_hotkeys, 
