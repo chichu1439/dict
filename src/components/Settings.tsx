@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useSettingsStore } from '../stores/settingsStore'
 import ThemeCard from './ThemeCard'
 import { en, zh } from '../locales'
@@ -14,14 +14,131 @@ const LANGUAGES = [
 ]
 
 const SERVICE_MODELS: Record<string, string[]> = {
-  'OpenAI': ['gpt-3.5-turbo', 'gpt-4o', 'gpt-4-turbo', 'gpt-4o-mini'],
-  'Claude': ['claude-3-haiku-20240307', 'claude-3-sonnet-20240229', 'claude-3-opus-20240229', 'claude-3-5-sonnet-20241022'],
+  'OpenAI': ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+  'Claude': ['claude-3-5-sonnet-20241022', 'claude-3-haiku-20240307', 'claude-3-sonnet-20240229', 'claude-3-opus-20240229'],
   'Ernie': ['ernie-4.0-8k', 'ernie-3.5-8k', 'ernie-speed-8k', 'ernie-lite-8k'],
-  'Gemini': ['gemini-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'],
+  'Gemini': ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-pro'],
   'Zhipu': ['glm-4', 'glm-4-flash', 'glm-4-plus', 'glm-4-air', 'glm-3-turbo'],
-  'Groq': ['llama3-8b-8192', 'llama3-70b-8192', 'mixtral-8x7b-32768', 'gemma-7b-it'],
-  'DeepSeek': ['deepseek-chat', 'deepseek-coder'],
-  'Alibaba': ['qwen-turbo', 'qwen-plus', 'qwen-max'],
+  'Groq': ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
+  'DeepSeek': ['deepseek-chat', 'deepseek-coder', 'deepseek-reasoner'],
+  'Alibaba': ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen-long'],
+}
+
+function ModelCombobox({ 
+  value, 
+  onChange, 
+  suggestions,
+  placeholder 
+}: { 
+  value: string
+  onChange: (value: string) => void
+  suggestions: string[]
+  placeholder?: string
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [inputValue, setInputValue] = useState(value)
+  const [showAll, setShowAll] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setInputValue(value)
+  }, [value])
+
+  const filteredSuggestions = showAll 
+    ? suggestions 
+    : (inputValue 
+        ? suggestions.filter(s => s.toLowerCase().includes(inputValue.toLowerCase()))
+        : suggestions)
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false)
+        setShowAll(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputValue(e.target.value)
+    onChange(e.target.value)
+    setShowAll(false)
+    setIsOpen(true)
+  }
+
+  const handleSelect = (suggestion: string) => {
+    setInputValue(suggestion)
+    onChange(suggestion)
+    setIsOpen(false)
+    setShowAll(false)
+  }
+
+  const handleFocus = () => {
+    setShowAll(true)
+    setIsOpen(true)
+  }
+
+  const handleToggleDropdown = () => {
+    if (!isOpen) {
+      setShowAll(true)
+      setInputValue(value)
+    }
+    setIsOpen(!isOpen)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      setIsOpen(false)
+      setShowAll(false)
+    } else if (e.key === 'Escape') {
+      setIsOpen(false)
+      setShowAll(false)
+      inputRef.current?.blur()
+    }
+  }
+
+  return (
+    <div className="relative" ref={dropdownRef}>
+      <input
+        ref={inputRef}
+        type="text"
+        value={inputValue}
+        onChange={handleInputChange}
+        onFocus={handleFocus}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        className="w-full bg-[var(--ui-surface-2)] border border-[var(--ui-border)] rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[var(--ui-accent)]/30 focus:border-[var(--ui-accent)] text-[var(--ui-text)] pr-8"
+      />
+      <button
+        type="button"
+        onClick={handleToggleDropdown}
+        className="absolute right-2 top-1/2 -translate-y-1/2 p-1 hover:bg-[var(--ui-surface)] rounded cursor-pointer"
+      >
+        <svg className={`w-4 h-4 text-[var(--ui-muted)] transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {isOpen && filteredSuggestions.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 bg-[var(--ui-surface)] border border-[var(--ui-border)] rounded-lg shadow-lg max-h-60 overflow-auto">
+          {filteredSuggestions.map((suggestion) => (
+            <button
+              key={suggestion}
+              type="button"
+              onClick={() => handleSelect(suggestion)}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-[var(--ui-surface-2)] cursor-pointer ${
+                suggestion === inputValue ? 'bg-[var(--ui-accent)]/10 text-[var(--ui-accent)]' : 'text-[var(--ui-text)]'
+              }`}
+            >
+              {suggestion}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function Settings({ onClose }: { onClose: () => void }) {
@@ -179,17 +296,14 @@ export default function Settings({ onClose }: { onClose: () => void }) {
         {models && (
           <div>
             <label className="block text-sm font-medium text-[var(--ui-muted)] mb-1">{t.services.model || 'Model'}</label>
-            <select
+            <ModelCombobox
               value={service.model || models[0]}
-              onChange={(e) => updateService(selectedServiceIndex, { model: e.target.value })}
-              className="w-full bg-[var(--ui-surface-2)] border border-[var(--ui-border)] rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-[var(--ui-accent)]/30 focus:border-[var(--ui-accent)] text-[var(--ui-text)]"
-            >
-              {models.map(m => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+              onChange={(value) => updateService(selectedServiceIndex, { model: value })}
+              suggestions={models}
+              placeholder={t.services.selectModel || 'Select or enter model name'}
+            />
             <p className="mt-1 text-xs text-[var(--ui-muted)]">
-              {t.services.selectModel || 'Select a model to use for translation'}
+              {t.services.modelHint || 'Select from list or type a custom model name'}
             </p>
           </div>
         )}

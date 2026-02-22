@@ -61,6 +61,7 @@ export const en = {
       enterKey: 'Enter API Key',
       model: 'Model',
       selectModel: 'Select Model',
+      modelHint: 'Select from list or type a custom model name',
     },
     hotkeys: {
       title: 'Keyboard Shortcuts',
@@ -172,6 +173,7 @@ export const zh = {
       enterKey: '请输入 API Key',
       model: '模型',
       selectModel: '选择模型',
+      modelHint: '从列表选择或输入自定义模型名称',
     },
     hotkeys: {
       title: '键盘快捷键',
