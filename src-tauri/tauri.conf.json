@@ -37,6 +37,25 @@
         "transparent": true,
         "shadow": false,
         "url": "overlay.html"
+      },
+      {
+        "label": "float",
+        "title": "Float Translation",
+        "width": 400,
+        "height": 300,
+        "minWidth": 300,
+        "minHeight": 200,
+        "resizable": true,
+        "center": false,
+        "x": 100,
+        "y": 100,
+        "decorations": false,
+        "skipTaskbar": true,
+        "visible": false,
+        "alwaysOnTop": true,
+        "transparent": true,
+        "shadow": true,
+        "url": "float.html"
       }
     ],
     "security": {

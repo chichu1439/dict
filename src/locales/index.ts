@@ -17,6 +17,7 @@ export const en = {
     settings: 'Settings',
     switchToGold: 'Switch to Black Gold',
     switchToStone: 'Switch to Warm Stone',
+    floatWindow: 'Float Window',
   },
   translate: {
     placeholder: 'Enter text to translate...',
@@ -134,6 +135,7 @@ export const zh = {
     settings: '设置',
     switchToGold: '切换到黑金',
     switchToStone: '切换到暖石',
+    floatWindow: '浮动窗口',
   },
   translate: {
     placeholder: '请输入要翻译的文本...',

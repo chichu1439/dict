@@ -7,6 +7,8 @@ mod ocr;
 mod hotkey;
 mod tts;
 mod services;
+mod phonetic;
+mod dictionary;
 
 use error::AppError;
 use models::{TranslationRequest, TranslationResponse};
@@ -66,6 +68,32 @@ async fn capture_screen(x: i32, y: i32, w: i32, h: i32) -> Result<String, String
 #[tauri::command]
 async fn speak(request: TtsRequest) -> Result<TtsResponse, String> {
     tts::speak(request).await.map_err(|e: AppError| e.to_string())
+}
+
+#[tauri::command]
+fn get_phonetic(text: String) -> Result<Option<phonetic::PhoneticResult>, String> {
+    if phonetic::is_single_english_word(&text) {
+        Ok(phonetic::get_phonetic_both(&text))
+    } else {
+        Ok(None)
+    }
+}
+
+#[tauri::command]
+async fn lookup_dictionary(word: String) -> Result<Option<dictionary::DictionaryEntry>, String> {
+    match dictionary::lookup_word(&word).await {
+        Ok(entries) => {
+            if let Some(entry) = entries.into_iter().next() {
+                Ok(Some(entry))
+            } else {
+                Ok(None)
+            }
+        }
+        Err(e) => {
+            println!("Dictionary lookup failed: {}", e);
+            Ok(None)
+        }
+    }
 }
 
 #[tauri::command]
@@ -164,6 +192,8 @@ fn main() {
             capture_and_ocr_with_engine,
             capture_screen, 
             speak,
+            get_phonetic,
+            lookup_dictionary,
             recognize_formula,
             init_paddle_ocr_cmd,
             check_paddle_ocr_status,

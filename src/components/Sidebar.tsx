@@ -1,5 +1,6 @@
 import { useSettingsStore } from '../stores/settingsStore'
 import { en, zh } from '../locales'
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow'
 
 interface SidebarProps {
   activeTab: string
@@ -12,6 +13,19 @@ interface SidebarProps {
 export default function Sidebar({ activeTab, onTabChange, onThemeToggle, themeLabel, themeIsGold }: SidebarProps) {
   const { uiLanguage } = useSettingsStore()
   const t = uiLanguage === 'zh' ? zh.sidebar : en.sidebar
+
+  const toggleFloatWindow = async () => {
+    const floatWindow = await WebviewWindow.getByLabel('float')
+    if (floatWindow) {
+      const isVisible = await floatWindow.isVisible()
+      if (isVisible) {
+        await floatWindow.hide()
+      } else {
+        await floatWindow.show()
+        await floatWindow.setFocus()
+      }
+    }
+  }
 
   const tabs = [
     { id: 'translate', icon: 'M3 5h12M9 3v2m1.048 9.5A18.022 18.022 0 016.412 9m6.088 9h7M11 21l5-10 5 10M12.751 5C11.783 10.77 8.07 15.61 3 18.129', label: t.translate },
@@ -47,7 +61,16 @@ export default function Sidebar({ activeTab, onTabChange, onThemeToggle, themeLa
         ))}
       </nav>
 
-      <div className="mt-auto pb-4">
+      <div className="mt-auto pb-4 flex flex-col gap-3">
+        <button
+          onClick={toggleFloatWindow}
+          className="w-14 h-14 rounded-xl flex items-center justify-center transition-all duration-200 group relative cursor-pointer text-[var(--ui-muted)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]"
+          title={t.floatWindow || 'Float Window'}
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z" />
+          </svg>
+        </button>
         <button
           onClick={onThemeToggle}
           className="w-14 h-14 rounded-xl flex items-center justify-center transition-all duration-200 group relative cursor-pointer text-[var(--ui-muted)] hover:bg-[var(--ui-surface-2)] hover:text-[var(--ui-text)]"

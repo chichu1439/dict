@@ -1,4 +1,4 @@
-import { useState, memo, useCallback } from 'react'
+import { useState, memo, useCallback, useEffect } from 'react'
 import { writeText } from '@tauri-apps/plugin-clipboard-manager'
 import { invoke } from '@tauri-apps/api/core'
 import { useSettingsStore } from '../stores/settingsStore'
@@ -12,15 +12,32 @@ interface TranslationService {
   fromCache?: boolean
 }
 
+interface PhoneticResult {
+  uk?: string
+  us?: string
+}
+
+// 检查是否为单个英文单词
+function isSingleEnglishWord(text: string): boolean {
+  const trimmed = text.trim()
+  // 检查是否包含空格
+  if (trimmed.includes(' ')) {
+    return false
+  }
+  // 检查是否只包含英文字母（允许首字母大写）
+  return trimmed.length > 0 && trimmed.split('').every(c => /[a-zA-Z]/.test(c))
+}
+
 interface ServiceResultProps {
   result: TranslationService
   onCopy: (text: string, name: string) => void
-  onTTS: (name: string) => void
+  onTTS: (name: string, voice?: string) => void
   copiedService: string | null
   ttsPlaying: string | null
+  phonetic?: PhoneticResult | null
 }
 
-const ServiceResult = memo(function ServiceResult({ result, onCopy, onTTS, copiedService, ttsPlaying }: ServiceResultProps) {
+const ServiceResult = memo(function ServiceResult({ result, onCopy, onTTS, copiedService, ttsPlaying, phonetic }: ServiceResultProps) {
   return (
     <div className="bg-[var(--ui-surface)] rounded-xl p-4 border border-[var(--ui-border)] shadow-sm">
       <div className="flex items-center justify-between mb-2">
@@ -75,7 +92,44 @@ const ServiceResult = memo(function ServiceResult({ result, onCopy, onTTS, copie
       {result.error ? (
         <p className="text-red-500 dark:text-red-400 text-sm">{result.error}</p>
       ) : (
-        <p className="text-[var(--ui-text)] text-base leading-relaxed whitespace-pre-wrap">{result.text}</p>
+        <>
+          {/* 音标显示 */}
+          {phonetic && (phonetic.uk || phonetic.us) && (
+            <div className="flex items-center gap-3 mb-2 text-sm">
+              {phonetic.uk && (
+                <div className="flex items-center gap-1">
+                  <span className="text-[var(--ui-muted)] text-xs">UK</span>
+                  <span className="text-[var(--ui-accent)] font-mono">{phonetic.uk}</span>
+                  <button
+                    onClick={() => onTTS(result.name, 'uk')}
+                    className="text-[var(--ui-muted)] hover:text-[var(--ui-accent)] transition-colors"
+                    title="Play UK pronunciation"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891 1.077 1.337 1.707 1.707L5.586 15z" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+              {phonetic.us && (
+                <div className="flex items-center gap-1">
+                  <span className="text-[var(--ui-muted)] text-xs">US</span>
+                  <span className="text-[var(--ui-accent)] font-mono">{phonetic.us}</span>
+                  <button
+                    onClick={() => onTTS(result.name, 'us')}
+                    className="text-[var(--ui-muted)] hover:text-[var(--ui-accent)] transition-colors"
+                    title="Play US pronunciation"
+                  >
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891 1.077 1.337 1.707 1.707L5.586 15z" />
+                    </svg>
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+          <p className="text-[var(--ui-text)] text-base leading-relaxed whitespace-pre-wrap">{result.text}</p>
+        </>
       )}
     </div>
   )
@@ -203,9 +257,74 @@ function TranslationResultBase({ sourceText, results, isLoading, onSourceTextCha
   const [ttsPlaying, setTtsPlaying] = useState<string | null>(null)
   const [isEditing, setIsEditing] = useState(false)
   const [editedText, setEditedText] = useState(sourceText || '')
+  const [phonetics, setPhonetics] = useState<Map<string, PhoneticResult>>(new Map())
 
   const { uiLanguage } = useSettingsStore()
   const t = uiLanguage === 'zh' ? zh.translate : en.translate
+
+  // 获取每个翻译结果的音标（使用在线词典 API）
+  useEffect(() => {
+    const fetchPhonetics = async () => {
+      const newPhonetics = new Map<string, PhoneticResult>()
+      
+      for (const result of results) {
+        if (!result.error && result.text) {
+          const trimmedText = result.text.trim()
+          
+          // 只查询单个英文单词（避免查询中文或长文本）
+          if (!isSingleEnglishWord(trimmedText)) {
+            continue
+          }
+          
+          try {
+            // 首先尝试在线词典 API
+            const dictEntry = await invoke<{ phonetics: Array<{ text?: string; audio?: string }> } | null>('lookup_dictionary', { word: trimmedText })
+            
+            if (dictEntry && dictEntry.phonetics) {
+              let ukPhonetic = null
+              let usPhonetic = null
+              
+              for (const p of dictEntry.phonetics) {
+                if (p.text) {
+                  // 根据音频 URL 判断是 UK 还是 US
+                  if (p.audio?.includes('-uk-') || p.audio?.includes('/uk/')) {
+                    ukPhonetic = p.text
+                  } else if (p.audio?.includes('-us-') || p.audio?.includes('/us/')) {
+                    usPhonetic = p.text
+                  } else if (!ukPhonetic && !usPhonetic) {
+                    // 如果没有找到特定地区的，先存到 UK
+                    ukPhonetic = p.text
+                  }
+                }
+              }
+              
+              if (ukPhonetic || usPhonetic) {
+                newPhonetics.set(result.name, { 
+                  uk: ukPhonetic || undefined, 
+                  us: usPhonetic || undefined 
+                })
+                continue
+              }
+            }
+            
+            // 如果在线 API 失败，回退到本地词典
+            const phoneticResult = await invoke<PhoneticResult | null>('get_phonetic', { text: result.text })
+            if (phoneticResult) {
+              newPhonetics.set(result.name, phoneticResult)
+            }
+          } catch (error) {
+            console.error(`Failed to get phonetic for ${result.name}:`, error)
+          }
+        }
+      }
+      
+      setPhonetics(newPhonetics)
+    }
+    
+    if (results.length > 0) {
+      fetchPhonetics()
+    }
+  }, [results])
 
   if (sourceText && editedText === '' && !isEditing) {
     setEditedText(sourceText)
@@ -250,20 +369,103 @@ function TranslationResultBase({ sourceText, results, isLoading, onSourceTextCha
     }
   }, [])
 
-  const handleTTS = useCallback(async (serviceName: string) => {
+  const [audioUrls, setAudioUrls] = useState<Map<string, { uk?: string; us?: string }>>(new Map())
+
+  // 获取发音音频 URL
+  useEffect(() => {
+    const fetchAudioUrls = async () => {
+      const newAudioUrls = new Map<string, { uk?: string; us?: string }>()
+      
+      for (const result of results) {
+        if (!result.error && result.text) {
+          const trimmedText = result.text.trim()
+          
+          // 只查询单个英文单词
+          if (!isSingleEnglishWord(trimmedText)) {
+            continue
+          }
+          
+          try {
+            const dictEntry = await invoke<{ 
+              phonetics: Array<{ text?: string; audio?: string }> 
+            } | null>('lookup_dictionary', { word: trimmedText })
+            
+            if (dictEntry && dictEntry.phonetics) {
+              let ukUrl = undefined
+              let usUrl = undefined
+              
+              for (const p of dictEntry.phonetics) {
+                if (p.audio) {
+                  if (p.audio.includes('-uk-') || p.audio.includes('/uk/')) {
+                    ukUrl = p.audio
+                  } else if (p.audio.includes('-us-') || p.audio.includes('/us/')) {
+                    usUrl = p.audio
+                  }
+                }
+              }
+              
+              if (ukUrl || usUrl) {
+                newAudioUrls.set(result.name, { uk: ukUrl, us: usUrl })
+              }
+            }
+          } catch (error) {
+            console.error(`Failed to get audio URL for ${result.name}:`, error)
+          }
+        }
+      }
+      
+      setAudioUrls(newAudioUrls)
+    }
+    
+    if (results.length > 0) {
+      fetchAudioUrls()
+    }
+  }, [results])
+
+  const handleTTS = useCallback(async (serviceName: string, voice?: string) => {
     setTtsPlaying(serviceName)
     try {
       const text = results.find(r => r.name === serviceName)?.text || ''
-      await invoke('speak', {
-        text: text,
-        voice: null
+      if (!text.trim()) {
+        console.warn('TTS: Empty text, skipping')
+        setTtsPlaying(null)
+        return
+      }
+      
+      // 优先使用在线音频 URL
+      const urls = audioUrls.get(serviceName)
+      const audioUrl = voice === 'uk' ? urls?.uk : voice === 'us' ? urls?.us : (urls?.us || urls?.uk)
+      
+      if (audioUrl) {
+        console.log('Playing audio from URL:', audioUrl)
+        const audio = new Audio(audioUrl)
+        audio.onended = () => setTtsPlaying(null)
+        audio.onerror = () => {
+          console.error('Audio playback failed, falling back to system TTS')
+          // 如果在线音频播放失败，回退到系统 TTS
+          invoke<{ success: boolean; message: string }>('speak', {
+            request: { text, voice: voice || null }
+          }).then(() => setTimeout(() => setTtsPlaying(null), 3000))
+        }
+        await audio.play()
+        return
+      }
+      
+      // 如果没有在线音频，使用系统 TTS
+      console.log('TTS: Playing text with voice', voice || 'default', ':', text.substring(0, 50))
+      const response = await invoke<{ success: boolean; message: string }>('speak', {
+        request: {
+          text: text,
+          voice: voice || null
+        }
       })
+      console.log('TTS response:', response)
       setTimeout(() => setTtsPlaying(null), 3000)
     } catch (error) {
       console.error('TTS error:', error)
       setTimeout(() => setTtsPlaying(null), 1000)
     }
-  }, [results])
+  }, [results, audioUrls])
 
   if (isLoading) {
     return (
@@ -311,6 +513,7 @@ function TranslationResultBase({ sourceText, results, isLoading, onSourceTextCha
             onTTS={handleTTS}
             copiedService={copiedService}
             ttsPlaying={ttsPlaying}
+            phonetic={phonetics.get(result.name)}
           />
         ))}
       </div>
