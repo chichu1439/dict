@@ -170,14 +170,9 @@ export default function InputTranslation({ initialText, initialOcrInfo }: { init
   const handleTranslate = async () => {
     if (!inputText.trim()) return
 
-    setIsLoading(true)
-    setHasSearched(true)
-    setResults([])
-
     // @ts-ignore
     if (typeof window !== 'undefined' && !window.__TAURI_INTERNALS__) {
       alert('Tauri API not found. Please run this app using "npm run tauri:dev" or the built executable, not a standard browser.')
-      setIsLoading(false)
       return
     }
 
@@ -190,9 +185,12 @@ export default function InputTranslation({ initialText, initialOcrInfo }: { init
       
       if (isPending(inputText, detected, target, serviceNames)) {
         console.log('Request already pending, skipping duplicate')
-        setIsLoading(false)
         return
       }
+
+      setIsLoading(true)
+      setHasSearched(true)
+      setResults([])
 
       const requestKey = addPending(inputText, detected, target, serviceNames)
 

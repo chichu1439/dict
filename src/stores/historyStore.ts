@@ -32,9 +32,37 @@ const useHistoryStore = create<HistoryStore>()(
       favorites: [],
       
       addToHistory: (item: TranslationItem) => {
-        set((state: PersistedHistoryStore) => ({
-          history: [item, ...state.history.filter(h => h.id !== item.id)].slice(0, 1000)
-        }))
+        set((state: PersistedHistoryStore) => {
+          // 检查是否已有相同源文本和目标语言的历史记录
+          const existingIndex = state.history.findIndex(h => 
+            h.sourceText === item.sourceText && 
+            h.targetLang === item.targetLang
+          )
+          
+          let newHistory: TranslationItem[]
+          
+          if (existingIndex !== -1) {
+            // 如果存在相同记录，移除旧的，添加新的（更新到最新）
+            const existingItem = state.history[existingIndex]
+            // 保留收藏状态
+            const mergedItem = {
+              ...item,
+              isFavorite: existingItem.isFavorite || item.isFavorite
+            }
+            newHistory = [
+              mergedItem,
+              ...state.history.slice(0, existingIndex),
+              ...state.history.slice(existingIndex + 1)
+            ]
+          } else {
+            // 如果不存在，直接添加
+            newHistory = [item, ...state.history]
+          }
+          
+          return {
+            history: newHistory.slice(0, 1000)
+          }
+        })
       },
       
       addToFavorites: (item: TranslationItem) => {

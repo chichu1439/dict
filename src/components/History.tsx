@@ -147,7 +147,7 @@ export default function History({ onClose, onSelect }: { onClose: () => void; on
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-[var(--ui-surface)] rounded-xl w-full max-w-3xl max-h-[90vh] overflow-hidden m-4 flex flex-col shadow-2xl border border-[var(--ui-border)]">
+      <div className="bg-[var(--ui-surface)] rounded-xl w-full max-w-3xl max-h-[90vh] overflow-hidden m-4 flex flex-col shadow-2xl border border-[var(--ui-border)]" onClick={e => e.stopPropagation()}>
         <header className="flex items-center justify-between p-4 border-b border-[var(--ui-border)] flex-shrink-0">
           <h2 className="text-lg font-semibold text-[var(--ui-text)]">{t.title}</h2>
           <button
