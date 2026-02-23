@@ -34,8 +34,28 @@ async fn ocr(request: OcrRequest) -> Result<OcrResult, String> {
 }
 
 #[tauri::command]
+async fn ocr_with_engine(request: OcrRequest, engine: String) -> Result<OcrResult, String> {
+    ocr::perform_ocr_with_engine(request, &engine).await.map_err(|e: AppError| e.to_string())
+}
+
+#[tauri::command]
 async fn capture_and_ocr(x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<OcrResult, String> {
     ocr::capture_and_ocr(x, y, w, h, language).await.map_err(|e: AppError| e.to_string())
+}
+
+#[tauri::command]
+async fn capture_and_ocr_with_engine(x: i32, y: i32, w: i32, h: i32, language: Option<String>, engine: String) -> Result<OcrResult, String> {
+    ocr::capture_and_ocr_with_engine(x, y, w, h, language, &engine).await.map_err(|e: AppError| e.to_string())
+}
+
+#[tauri::command]
+async fn init_paddle_ocr_cmd() -> Result<String, String> {
+    ocr::paddle::init_paddle_ocr().await.map(|_| "PaddleOCR initialized successfully".to_string()).map_err(|e: AppError| e.to_string())
+}
+
+#[tauri::command]
+fn check_paddle_ocr_status() -> bool {
+    ocr::paddle::is_paddle_ocr_available()
 }
 
 #[tauri::command]
@@ -139,10 +159,14 @@ fn main() {
             translate, 
             translate_stream, 
             ocr, 
+            ocr_with_engine,
             capture_and_ocr, 
+            capture_and_ocr_with_engine,
             capture_screen, 
             speak,
             recognize_formula,
+            init_paddle_ocr_cmd,
+            check_paddle_ocr_status,
             hotkey::get_hotkeys, 
             hotkey::set_hotkey, 
             hotkey::register_hotkeys, 

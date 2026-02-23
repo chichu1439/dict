@@ -1,5 +1,6 @@
 pub mod models;
 pub mod mathpix;
+pub mod paddle;
 
 use crate::ocr::models::{OcrRequest, OcrResult as AppOcrResult};
 use crate::error::{AppError, Result};
@@ -340,7 +341,11 @@ async fn recognize_bytes(image_data: Vec<u8>, language: Option<String>) -> Resul
 }
 
 pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult> {
-    println!("Starting OCR processing...");
+    perform_ocr_with_engine(request, "windows").await
+}
+
+pub async fn perform_ocr_with_engine(request: OcrRequest, engine: &str) -> Result<AppOcrResult> {
+    println!("Starting OCR processing with engine: {}...", engine);
     
     let image_data = if let Some(path) = request.image_path {
         println!("Loading image from path: {}", path);
@@ -355,21 +360,14 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult> {
         }
     } else if let Some(data) = request.image_data {
         println!("Decoding base64 image data, size: {} chars", data.len());
-        #[cfg(target_os = "windows")]
-        {
-            match general_purpose::STANDARD.decode(&data) {
-                Ok(decoded) => {
-                    println!("Base64 decoded successfully, size: {} bytes", decoded.len());
-                    decoded
-                }
-                Err(e) => {
-                    return Err(AppError::Ocr(format!("Failed to decode base64 image data: {}", e)));
-                }
+        match general_purpose::STANDARD.decode(&data) {
+            Ok(decoded) => {
+                println!("Base64 decoded successfully, size: {} bytes", decoded.len());
+                decoded
             }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            return Err(AppError::PlatformNotSupported("Base64 image decoding not supported on this platform".to_string()));
+            Err(e) => {
+                return Err(AppError::Ocr(format!("Failed to decode base64 image data: {}", e)));
+            }
         }
     } else {
         return Err(AppError::InvalidRequest("No image data provided. Please provide either image_path or image_data.".to_string()));
@@ -377,22 +375,17 @@ pub async fn perform_ocr(request: OcrRequest) -> Result<AppOcrResult> {
 
     println!("Processing image with OCR, size: {} bytes", image_data.len());
 
-    #[cfg(target_os = "windows")]
-    {
-        match recognize_bytes(image_data, request.language).await {
-            Ok(result) => {
-                println!("OCR completed successfully, text length: {}", result.text.len());
-                Ok(result)
-            }
-            Err(e) => {
-                println!("OCR processing failed: {}", e);
-                Err(e)
-            }
+    if engine == "paddle" {
+        paddle::paddle_ocr_recognize(&image_data)
+    } else {
+        #[cfg(target_os = "windows")]
+        {
+            recognize_bytes(image_data, request.language).await
         }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        Err(AppError::PlatformNotSupported("Windows OCR API is only available on Windows platform".to_string()))
+        #[cfg(not(target_os = "windows"))]
+        {
+            Err(AppError::PlatformNotSupported("Windows OCR API is only available on Windows platform".to_string()))
+        }
     }
 }
 
@@ -403,18 +396,25 @@ pub async fn capture_screen(x: i32, y: i32, w: i32, h: i32) -> Result<String> {
 }
 
 pub async fn capture_and_ocr(x: i32, y: i32, w: i32, h: i32, language: Option<String>) -> Result<AppOcrResult> {
-    println!("Capturing and performing OCR at ({}, {}) size ({}x{})", x, y, w, h);
+    capture_and_ocr_with_engine(x, y, w, h, language, "windows").await
+}
+
+pub async fn capture_and_ocr_with_engine(x: i32, y: i32, w: i32, h: i32, language: Option<String>, engine: &str) -> Result<AppOcrResult> {
+    println!("Capturing and performing OCR at ({}, {}) size ({}x{}) with engine: {}", x, y, w, h, engine);
     
     #[cfg(target_os = "windows")]
     {
         let (raw_pixels, w, h) = unsafe { capture_bitmap(x, y, w, h)? };
         
-        println!("Preprocessing image: {}x{} -> Upscaling 2x with padding", w, h);
-        let (processed_pixels, new_w, new_h) = preprocess_image(&raw_pixels, w, h);
-        
-        let bmp_data = create_bmp_file(&processed_pixels, new_w, new_h);
-        
-        recognize_bytes(bmp_data, language).await
+        if engine == "paddle" {
+            let png_data = create_png_from_pixels(&raw_pixels, w, h);
+            paddle::paddle_ocr_recognize(&png_data)
+        } else {
+            println!("Preprocessing image: {}x{} -> Upscaling 2x with padding", w, h);
+            let (processed_pixels, new_w, new_h) = preprocess_image(&raw_pixels, w, h);
+            let bmp_data = create_bmp_file(&processed_pixels, new_w, new_h);
+            recognize_bytes(bmp_data, language).await
+        }
     }
     
     #[cfg(not(target_os = "windows"))]
@@ -422,4 +422,16 @@ pub async fn capture_and_ocr(x: i32, y: i32, w: i32, h: i32, language: Option<St
         let ocr_impl = get_ocr_impl();
         ocr_impl.capture_and_ocr(x, y, w, h, language)
     }
+}
+
+#[cfg(target_os = "windows")]
+fn create_png_from_pixels(pixels: &[u8], w: i32, h: i32) -> Vec<u8> {
+    let img: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> = image::ImageBuffer::from_raw(
+        w as u32, h as u32, pixels.to_vec()
+    ).expect("Failed to create image buffer");
+    
+    let mut png_data = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut png_data), image::ImageFormat::Png)
+        .expect("Failed to write PNG");
+    png_data
 }

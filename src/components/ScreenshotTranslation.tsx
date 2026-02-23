@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow, PhysicalPosition, PhysicalSize } from '@tauri-apps/api/window'
@@ -22,7 +22,7 @@ export default function ScreenshotTranslation() {
   // Removed preCaptureStateRef as it's no longer needed for overlay window
   const monitorRef = useRef<MonitorInfo | null>(null)
 
-  const { ocrLanguage, ocrShowResult } = useSettingsStore()
+  const { ocrLanguage, ocrEngine, ocrShowResult } = useSettingsStore()
 
   const safeWindowCall = useCallback(async (label: string, action: () => Promise<void>) => {
     try {
@@ -193,12 +193,13 @@ export default function ScreenshotTranslation() {
 
       // Call backend to capture and OCR directly
       // This is the native way: let backend handle the heavy lifting
-      const ocrResult = await invoke<{ text: string, confidence: number }>('capture_and_ocr', {
+      const ocrResult = await invoke<{ text: string, confidence: number }>('capture_and_ocr_with_engine', {
         x: absX,
         y: absY,
         w: physW,
         h: physH,
-        language: ocrLanguage // Make sure language is passed correctly. e.g. "zh" or "zh-Hans" or "auto"
+        language: ocrLanguage,
+        engine: ocrEngine
       });
 
       // Show window again if we want to show result locally (not implemented)
@@ -231,7 +232,11 @@ export default function ScreenshotTranslation() {
       console.error('Screenshot translation error:', error)
       let userFriendlyMsg = 'An error occurred during processing.';
       const errorStr = String(error);
-      if (errorStr.includes('OCR') && errorStr.includes('No text')) {
+      if (errorStr.includes('PaddleOCR') || errorStr.includes('paddleocr')) {
+        userFriendlyMsg = 'PaddleOCR error. Please ensure paddleocr is installed: pip install paddleocr';
+      } else if (errorStr.includes('Python not found')) {
+        userFriendlyMsg = 'Python not found. Please install Python to use PaddleOCR.';
+      } else if (errorStr.includes('OCR') && errorStr.includes('No text')) {
         userFriendlyMsg = 'No text detected. Please select a clearer text area.';
       } else if (errorStr.includes('network') || errorStr.includes('Network')) {
         userFriendlyMsg = 'Network error. Please check your connection and try again.';

@@ -147,9 +147,11 @@ export default function Settings({ onClose }: { onClose: () => void }) {
 
   const {
     services, hotkeys, sourceLang, targetLang, windowOpacity, darkMode, themePreset, themePreview, loaded, uiLanguage,
-    ocrLanguage, ocrMode, ocrEnhance, ocrLimitMaxSize, ocrMaxDimension, ocrResultAutoCloseMs, ocrShowResult,
+    ocrLanguage, ocrMode, ocrEngine, ocrEnhance, ocrLimitMaxSize, ocrMaxDimension, ocrResultAutoCloseMs, ocrShowResult,
+    paddleOcrAvailable,
     updateService, updateHotkey, setSourceLang, setTargetLang, setWindowOpacity, setDarkMode, setThemePreset, setThemePreview, setUiLanguage,
-    setOcrLanguage, setOcrMode, setOcrEnhance, setOcrLimitMaxSize, setOcrMaxDimension, setOcrResultAutoCloseMs, setOcrShowResult,
+    setOcrLanguage, setOcrMode, setOcrEngine, setOcrEnhance, setOcrLimitMaxSize, setOcrMaxDimension, setOcrResultAutoCloseMs, setOcrShowResult,
+    checkPaddleOcr,
     loadSettings, saveSettings, setServices
   } = useSettingsStore()
 
@@ -173,6 +175,12 @@ export default function Settings({ onClose }: { onClose: () => void }) {
       loadSettings()
     }
   }, [loaded, loadSettings])
+
+  useEffect(() => {
+    if (activeTab === 'ocr' && paddleOcrAvailable === null) {
+      checkPaddleOcr()
+    }
+  }, [activeTab, paddleOcrAvailable, checkPaddleOcr])
 
   const handleSave = async () => {
     await saveSettings()
@@ -585,6 +593,46 @@ export default function Settings({ onClose }: { onClose: () => void }) {
                   <div className="space-y-6 max-w-2xl">
                     <h3 className="text-lg font-medium text-[var(--ui-text)] mb-6">{t.ocr.title}</h3>
                     <div className="space-y-6">
+                      <div>
+                        <label className="block text-sm font-medium text-[var(--ui-muted)] mb-2">{t.ocr.engine}</label>
+                        <div className="flex gap-3">
+                          <button
+                            onClick={() => setOcrEngine('windows')}
+                            className={`flex-1 px-4 py-3 rounded-lg border transition-all cursor-pointer ${
+                              ocrEngine === 'windows' 
+                                ? 'border-[var(--ui-accent)] bg-[var(--ui-accent)]/10 text-[var(--ui-text)]' 
+                                : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-muted)] hover:border-[var(--ui-accent)]/50'
+                            }`}
+                          >
+                            <div className="font-medium text-sm">{t.ocr.engineWindows}</div>
+                            <div className="text-xs mt-1 opacity-70">{t.ocr.engineWindowsHint}</div>
+                          </button>
+                          <button
+                            onClick={() => setOcrEngine('paddle')}
+                            className={`flex-1 px-4 py-3 rounded-lg border transition-all cursor-pointer ${
+                              ocrEngine === 'paddle' 
+                                ? 'border-[var(--ui-accent)] bg-[var(--ui-accent)]/10 text-[var(--ui-text)]' 
+                                : 'border-[var(--ui-border)] bg-[var(--ui-surface-2)] text-[var(--ui-muted)] hover:border-[var(--ui-accent)]/50'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="font-medium text-sm">{t.ocr.enginePaddle}</div>
+                              {paddleOcrAvailable === null ? (
+                                <span className="text-xs opacity-50">Checking...</span>
+                              ) : paddleOcrAvailable ? (
+                                <span className="text-xs text-emerald-500">✓ Ready</span>
+                              ) : (
+                                <span className="text-xs text-amber-500">Not installed</span>
+                              )}
+                            </div>
+                            <div className="text-xs mt-1 opacity-70">{t.ocr.enginePaddleHint}</div>
+                            {!paddleOcrAvailable && (
+                              <div className="text-xs mt-1 text-amber-500/80">pip install paddleocr</div>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
                       <div>
                         <label className="block text-sm font-medium text-[var(--ui-muted)] mb-2">{t.ocr.language}</label>
                         <select

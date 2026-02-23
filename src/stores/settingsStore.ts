@@ -30,6 +30,7 @@ interface SettingsState {
     windowMaximized: boolean
     ocrLanguage: 'auto' | 'zh' | 'en' | 'ja' | 'ko'
     ocrMode: 'accuracy' | 'speed'
+    ocrEngine: 'windows' | 'paddle'
     ocrEnhance: boolean
     ocrLimitMaxSize: boolean
     ocrMaxDimension: number
@@ -41,6 +42,7 @@ interface SettingsState {
     debugOpen: boolean
     uiLanguage: 'en' | 'zh'
     loaded: boolean
+    paddleOcrAvailable: boolean | null
 
     setServices: (services: ServiceConfig[]) => void
     updateService: (index: number, updates: Partial<ServiceConfig>) => void
@@ -54,6 +56,7 @@ interface SettingsState {
     setWindowMaximized: (maximized: boolean) => void
     setOcrLanguage: (lang: 'auto' | 'zh' | 'en' | 'ja' | 'ko') => void
     setOcrMode: (mode: 'accuracy' | 'speed') => void
+    setOcrEngine: (engine: 'windows' | 'paddle') => void
     setOcrEnhance: (enabled: boolean) => void
     setOcrLimitMaxSize: (enabled: boolean) => void
     setOcrMaxDimension: (value: number) => void
@@ -64,6 +67,8 @@ interface SettingsState {
     setThemePreview: (enabled: boolean) => void
     setDebugOpen: (enabled: boolean) => void
     setUiLanguage: (lang: 'en' | 'zh') => void
+    setPaddleOcrAvailable: (available: boolean | null) => void
+    checkPaddleOcr: () => Promise<void>
     loadSettings: () => Promise<void>
     saveSettings: () => Promise<void>
     saveUiSettings: () => Promise<void>
@@ -110,6 +115,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     windowMaximized: false,
     ocrLanguage: 'auto',
     ocrMode: 'accuracy',
+    ocrEngine: 'windows',
     ocrEnhance: true,
     ocrLimitMaxSize: false,
     ocrMaxDimension: 1600,
@@ -121,6 +127,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     debugOpen: false,
     uiLanguage: 'en',
     loaded: false,
+    paddleOcrAvailable: null,
 
     setServices: (services) => set({ services }),
 
@@ -164,6 +171,10 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         set({ ocrMode: mode })
         scheduleUiSave(get)
     },
+    setOcrEngine: (engine) => {
+        set({ ocrEngine: engine })
+        scheduleUiSave(get)
+    },
     setOcrEnhance: (enabled) => {
         set({ ocrEnhance: enabled })
         scheduleUiSave(get)
@@ -204,6 +215,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
         set({ uiLanguage: lang })
         scheduleUiSave(get)
     },
+    setPaddleOcrAvailable: (available) => {
+        set({ paddleOcrAvailable: available })
+    },
+    checkPaddleOcr: async () => {
+        if (get().paddleOcrAvailable !== null) return
+        try {
+            const available = await invoke<boolean>('check_paddle_ocr_status')
+            set({ paddleOcrAvailable: available })
+        } catch {
+            set({ paddleOcrAvailable: false })
+        }
+    },
 
     loadSettings: async () => {
         try {
@@ -219,6 +242,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             const windowMaximized = await store.get<boolean>('windowMaximized')
             const ocrLanguage = await store.get<'auto' | 'zh' | 'en' | 'ja' | 'ko'>('ocrLanguage')
             const ocrMode = await store.get<'accuracy' | 'speed'>('ocrMode')
+            const ocrEngine = await store.get<'windows' | 'paddle'>('ocrEngine')
             const ocrEnhance = await store.get<boolean>('ocrEnhance')
             const ocrLimitMaxSize = await store.get<boolean>('ocrLimitMaxSize')
             const ocrMaxDimension = await store.get<number>('ocrMaxDimension')
@@ -272,6 +296,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
                 windowMaximized: windowMaximized ?? false,
                 ocrLanguage: ocrLanguage ?? 'auto',
                 ocrMode: ocrMode ?? 'accuracy',
+                ocrEngine: ocrEngine ?? 'windows',
                 ocrEnhance: ocrEnhance ?? true,
                 ocrLimitMaxSize: ocrLimitMaxSize ?? false,
                 ocrMaxDimension: ocrMaxDimension ?? 1600,
@@ -312,6 +337,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             await store.set('windowMaximized', state.windowMaximized)
             await store.set('ocrLanguage', state.ocrLanguage)
             await store.set('ocrMode', state.ocrMode)
+            await store.set('ocrEngine', state.ocrEngine)
             await store.set('ocrEnhance', state.ocrEnhance)
             await store.set('ocrLimitMaxSize', state.ocrLimitMaxSize)
             await store.set('ocrMaxDimension', state.ocrMaxDimension)
@@ -348,6 +374,7 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
             await store.set('windowMaximized', state.windowMaximized)
             await store.set('ocrLanguage', state.ocrLanguage)
             await store.set('ocrMode', state.ocrMode)
+            await store.set('ocrEngine', state.ocrEngine)
             await store.set('ocrEnhance', state.ocrEnhance)
             await store.set('ocrLimitMaxSize', state.ocrLimitMaxSize)
             await store.set('ocrMaxDimension', state.ocrMaxDimension)

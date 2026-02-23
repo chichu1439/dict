@@ -87,6 +87,11 @@ export const en = {
     },
     ocr: {
       title: 'OCR',
+      engine: 'OCR Engine',
+      engineWindows: 'System Built-in',
+      engineWindowsHint: 'Fast, lightweight, no extra download',
+      enginePaddle: 'PaddleOCR',
+      enginePaddleHint: 'High accuracy, supports tilted text',
       language: 'Recognition Language',
       languageHint: 'Uses system languages when set to Auto',
       langAuto: 'Auto (System)',
@@ -199,6 +204,11 @@ export const zh = {
     },
     ocr: {
       title: 'OCR',
+      engine: 'OCR 引擎',
+      engineWindows: '系统内置',
+      engineWindowsHint: '快速、轻量、无需额外下载',
+      enginePaddle: 'PaddleOCR',
+      enginePaddleHint: '高精度、支持倾斜文字',
       language: '识别语言',
       languageHint: '自动时使用系统语言环境',
       langAuto: '自动（系统）',
